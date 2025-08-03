@@ -1,0 +1,19 @@
+# cabal build artifacts
+dist-newstyle/
+
+# GHC intermediate files
+.ghc.environment.*
+*.o
+*.hi
+*.dyn_o
+*.dyn_hi
+
+# GHCi and profiling files
+.ghci
+*.prof
+*.tix
+
+# IDE and Editor-specific files
+.vscode/
+.idea/
+.stack-work/
