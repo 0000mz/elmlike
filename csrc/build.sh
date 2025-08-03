@@ -22,3 +22,4 @@ VCPKG_TOOLCHAIN_FILE="${VCPKG_DIR}/scripts/buildsystems/vcpkg.cmake"
 cmake -B build -S . \
   -DCMAKE_TOOLCHAIN_FILE="${VCPKG_TOOLCHAIN_FILE}" \
   -G Ninja
+cmake --build build

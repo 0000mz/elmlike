@@ -18,4 +18,4 @@ EXPORT void stop_gui();
 }
 #endif
 
-#endif  // _ELMLIKE_H_
+#endif // _ELMLIKE_H_
