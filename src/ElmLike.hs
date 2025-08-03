@@ -4,6 +4,12 @@ module ElmLike (
 ) where
 
 import Control.Concurrent -- threadDelay
+import Foreign.C.Types
+
+foreign import ccall "elmlike start_gui"
+  _start_gui :: IO ()
+foreign import ccall "elmlike stop_gui"
+  _stop_gui :: IO ()
 
 -- Widgets
 data Widget = Text String | Button String String -- TODO button should have some 'onClick' events
@@ -20,15 +26,21 @@ data Program model_type command_type = Program {
 --   result of the update.
 --   `viewFn` controls the visual representation of the program based on the state.
 runProgram :: model_type -> (model_type -> command_type -> model_type) -> (model_type -> [Widget]) -> command_type -> IO ()
-runProgram initialModel updateFn viewFn cmd = programLifecycleStep (Program {
-  model    = initialModel,
-  updateFn = updateFn,
-  viewFn   = viewFn
-}) cmd
+runProgram initialModel updateFn viewFn cmd = do
+  _start_gui
+
+  programLifecycleStep (Program {
+    model    = initialModel,
+    updateFn = updateFn,
+    viewFn   = viewFn
+  }) cmd
+
+  _stop_gui
 
 programLifecycleStep :: Program model_type command_type -> command_type -> IO ()
 programLifecycleStep program cmd = do
-  let combined_widgets = map drawWidget ((viewFn program) (model program))
+  let
+      combined_widgets = (map drawWidget ((viewFn program) (model program)))
 
       concatWithSpace :: String -> String -> String
       concatWithSpace a b = a ++ " " ++ b

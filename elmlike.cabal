@@ -72,6 +72,10 @@ library
 
     -- Directories containing source files.
     hs-source-dirs:   src
+    -- TODO: Fix, using absolute filepath for the build dir of the csrcs.
+    -- Instead, this should be relative to the package database.
+    extra-lib-dirs: /Users/mob/Projects/elmlike/csrc/build
+    extra-libraries:  elmlike
 
     -- Base language which the package is written in.
     default-language: Haskell2010
