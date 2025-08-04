@@ -8,8 +8,6 @@ import Foreign.C.Types
 
 foreign import ccall "elmlike start_gui"
   _start_gui :: IO ()
-foreign import ccall "elmlike stop_gui"
-  _stop_gui :: IO ()
 foreign import ccall "elmlike poll_event_signal"
   _poll_event_signal :: IO CInt
 
@@ -45,8 +43,6 @@ runProgram initialModel updateFn viewFn cmd = do
     viewFn   = viewFn
   }) cmd
 
-  _stop_gui
-
 programLifecycleStep :: Program model_type command_type -> command_type -> IO ()
 programLifecycleStep program cmd = do
   let
@@ -58,6 +54,7 @@ programLifecycleStep program cmd = do
       spaceConcat :: [String] -> String
       spaceConcat lst = (foldl concatWithSpace "") lst
 
+      -- TODO: Instead of print to console, draw this to the render surface.
       in putStrLn (spaceConcat combined_widgets)
 
   do

@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <queue>
 #include <mutex>
+#include <memory>
 
 #include "VkBootstrap.h"
 
@@ -30,16 +31,18 @@ struct Renderer {
   vkb::Device vk_device;
   VkSurfaceKHR vk_surface;
   vkb::Instance vk_instance;
+
+  ~Renderer();
 };
-Renderer _renderer;
+
 std::thread _hs_thread;
 bool _start_gui = false;
 
-void run_ui_loop() {
-  assert(_renderer.window);
-  glfwMakeContextCurrent(_renderer.window);
-  while (!glfwWindowShouldClose(_renderer.window)) {
-    glfwSwapBuffers(_renderer.window);
+void run_ui_loop(Renderer& renderer) {
+  assert(renderer.window);
+  glfwMakeContextCurrent(renderer.window);
+  while (!glfwWindowShouldClose(renderer.window)) {
+    glfwSwapBuffers(renderer.window);
     glfwPollEvents();
   }
   {
@@ -49,7 +52,7 @@ void run_ui_loop() {
   printf("Window closed.\n");
 }
 
-int init_window_with_skia() {
+int init_window_with_skia(Renderer& renderer) {
   printf("Starting GUI.\n");
 
   if (!glfwInit()) {
@@ -67,13 +70,13 @@ int init_window_with_skia() {
     return 1;
   }
 
-  if (_renderer.window != nullptr) {
+  if (renderer.window != nullptr) {
     fprintf(stderr, "Window already initialized.\n");
     return 1;
   }
-  _renderer.window = glfwCreateWindow(800, 600, "Elmlike",
+  renderer.window = glfwCreateWindow(800, 600, "Elmlike",
     nullptr, nullptr);
-  if (_renderer.window == nullptr) {
+  if (renderer.window == nullptr) {
     fprintf(stderr, "Failed to create window.\n");
     return 1;
   }
@@ -93,7 +96,7 @@ int init_window_with_skia() {
 
   /// 2. Creating the VkSurface
   VkSurfaceKHR surface = VK_NULL_HANDLE;
-  if (glfwCreateWindowSurface(instance_ret.value(), _renderer.window, nullptr, &surface)) {
+  if (glfwCreateWindowSurface(instance_ret.value(), renderer.window, nullptr, &surface)) {
     fprintf(stderr, "Failed to create vulkan surface.\n");
     return 1;
   }
@@ -118,32 +121,30 @@ int init_window_with_skia() {
     return 1;
   }
 
-  _renderer.vk_device = device_ret.value();
-  _renderer.vk_instance = instance_ret.value();
-  _renderer.vk_surface = surface;
+  renderer.vk_device = device_ret.value();
+  renderer.vk_instance = instance_ret.value();
+  renderer.vk_surface = surface;
   return 0;
+}
+
+Renderer::~Renderer() {
+  if (!this->window) {
+    return;
+  }
+
+  vkb::destroy_device(this->vk_device);
+  vkb::destroy_surface(this->vk_instance, this->vk_surface);
+  vkb::destroy_instance(this->vk_instance);
+
+  printf("Stopping GUI.\n");
+  glfwDestroyWindow(this->window);
+  glfwTerminate();
 }
 
 } // namespace
 
 void start_gui() {
   _start_gui = true;
-}
-
-void stop_gui() {
-  printf("TODO: stop_gui invoked..\n");
-  // // TODO: Signal to the ui thread to terminate...
-  // if (!_renderer.window) {
-  //   return;
-  // }
-
-  // vkb::destroy_device(_renderer.vk_device);
-  // vkb::destroy_surface(_renderer.vk_instance, _renderer.vk_surface);
-  // vkb::destroy_instance(_renderer.vk_instance);
-
-  // printf("Stopping GUI.\n");
-  // glfwDestroyWindow(_renderer.window);
-  // glfwTerminate();
 }
 
 EventSignal _poll_event_signal() {
@@ -169,8 +170,10 @@ void UiExec(std::function<void()> hs_entry) {
     usleep(100'000); // 100ms
   }
   printf("[UiExec] received signal to start ui thread.\n");
-  init_window_with_skia();
-  run_ui_loop();
+
+  std::unique_ptr<Renderer> renderer = std::make_unique<Renderer>();
+  init_window_with_skia(*renderer);
+  run_ui_loop(*renderer);
   _hs_thread.join();
   printf("[UiExec] stopping hs thread.\n");
 }
