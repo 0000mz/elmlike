@@ -10,6 +10,16 @@ foreign import ccall "elmlike start_gui"
   _start_gui :: IO ()
 foreign import ccall "elmlike stop_gui"
   _stop_gui :: IO ()
+foreign import ccall "elmlike poll_event_signal"
+  _poll_event_signal :: IO CInt
+
+-- EventSignal: Keep these signal definitions in sync with
+-- the definition in the elmlike clib.
+data EventSignal = EventSignal_NONE | EventSignal_QUIT deriving (Show, Enum)
+
+intToEventSignal :: CInt -> EventSignal
+intToEventSignal 1 = EventSignal_QUIT
+intToEventSignal _ = EventSignal_NONE
 
 -- Widgets
 data Widget = Text String | Button String String -- TODO button should have some 'onClick' events
@@ -50,15 +60,13 @@ programLifecycleStep program cmd = do
 
       in putStrLn (spaceConcat combined_widgets)
 
-  -- TODO: Sleeping here for the sake of simulating state change. In this function,
-  -- we are signaling the same command indefinitely to the program's update then sleeping.
-  -- What we want instead is a way for events/actions taken within the program lifecycle
-  -- to emit the corresponding commands that can be used to generate a new state.
-  --
-  -- Need to brainstorm how to go about this implementation.
-  threadDelay 500000
-
-  programLifecycleStep (programRunUpdate program cmd) cmd
+  do
+    signal_raw <- _poll_event_signal
+    let
+      signal = intToEventSignal signal_raw
+      in case signal of
+        EventSignal_NONE -> programLifecycleStep (programRunUpdate program cmd) cmd
+        EventSignal_QUIT -> putStrLn "TODO quit application"
 
 programRunUpdate :: Program model_type command_type -> command_type -> Program model_type command_type
 programRunUpdate program cmd = Program {

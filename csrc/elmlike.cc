@@ -5,6 +5,8 @@
 #include <cassert>
 #include <thread>
 #include <unistd.h>
+#include <queue>
+#include <mutex>
 
 #include "VkBootstrap.h"
 
@@ -14,6 +16,13 @@
 #include <vulkan/vulkan.h>
 
 namespace {
+
+enum class EventSignal: int {
+  NONE = 0,
+  QUIT,
+};
+std::queue<EventSignal> _event_queue;
+std::mutex _event_queue_mutex;
 
 // TODO: Do not keep these variables globally allocated...
 struct Renderer {
@@ -32,6 +41,10 @@ void run_ui_loop() {
   while (!glfwWindowShouldClose(_renderer.window)) {
     glfwSwapBuffers(_renderer.window);
     glfwPollEvents();
+  }
+  {
+    std::scoped_lock l(_event_queue_mutex);
+    _event_queue.push(EventSignal::QUIT);
   }
   printf("Window closed.\n");
 }
@@ -131,6 +144,21 @@ void stop_gui() {
   // printf("Stopping GUI.\n");
   // glfwDestroyWindow(_renderer.window);
   // glfwTerminate();
+}
+
+EventSignal _poll_event_signal() {
+  usleep(100'000);
+  std::scoped_lock l(_event_queue_mutex);
+  if (_event_queue.empty()) {
+    return EventSignal::NONE;
+  }
+  const EventSignal sig = _event_queue.front();
+  _event_queue.pop();
+  return sig;
+}
+
+int poll_event_signal() {
+  return static_cast<int>(_poll_event_signal());
 }
 
 void UiExec(std::function<void()> hs_entry) {
