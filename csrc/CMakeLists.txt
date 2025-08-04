@@ -8,6 +8,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(BUILD_WITH_HASKELL_STUB "Build binaries that depend on haskell stub" OFF)
 
 if (APPLE)
   enable_language(OBJC)
@@ -29,10 +30,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glfw)
 
+find_package(PkgConfig REQUIRED)
 find_package(unofficial-skia REQUIRED)
 find_package(vk-bootstrap CONFIG REQUIRED)
 find_package(Vulkan REQUIRED)
 find_package(GTest CONFIG REQUIRED)
+find_package(Iconv REQUIRED)
+find_package(unofficial-libffi CONFIG REQUIRED)
+pkg_check_modules(gmp REQUIRED IMPORTED_TARGET gmp)
 
 ######################################################
 ### ElmLike C Lib
@@ -60,6 +65,18 @@ if(APPLE)
   target_link_libraries(elmlike_static PUBLIC "-framework Cocoa")
 endif()
 
+if (BUILD_WITH_HASKELL_STUB)
+  add_executable(elmlike_main elmlike_main.cc)
+  target_link_libraries(elmlike_main PRIVATE elmlike_static
+    # TODO: These libraries are needed by the archives linked in for ghc.
+    # There's gotta be a way, maybe pkgconfig, to specify the ghc archives
+    # as a required package so that the package's dependencies are also
+    # resolved and do not need to be enumerated at this level.
+    Iconv::Iconv
+    unofficial::libffi::libffi
+    PkgConfig::gmp)
+endif()
+
 ######################################################
 ### ElmLike Tests
 enable_testing()
@@ -69,3 +86,5 @@ target_link_libraries(gui_test PRIVATE
   GTest::gmock
   elmlike_static)
 add_test(AllTestsInMain gui_test)
+
+## TODO: Disable building all tests, i.e. SDL_test

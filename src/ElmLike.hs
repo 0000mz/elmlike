@@ -71,3 +71,41 @@ drawWidget :: Widget -> String
 drawWidget widget = case widget of
   (Text body) -> body
   (Button button_text _) -> button_text
+
+
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+-- TODO: Putting the example application here until I figure out a better
+-- structure. I definitely do not want to have the program state in the same
+-- place as the runtime implementation.
+--
+data AppState = AppState { counterValue :: Int }
+type Model = AppState
+
+exampleInitModel :: Model
+exampleInitModel = AppState { counterValue = 0 }
+
+-- The update function needs to be able to take a command,
+-- process the current state and generate a new state based on
+-- that command.
+data Command = Increment | Decrement | None
+exampleUpdateFn :: Model -> Command -> Model
+exampleUpdateFn model Increment = AppState { counterValue = (counterValue model) + 1 }
+exampleUpdateFn model Decrement = AppState { counterValue = (counterValue model) - 1 }
+exampleUpdateFn model _ = model
+
+exampleViewFn :: Model -> [Widget]
+exampleViewFn model = [Text (show (counterValue model)), Text "more stuff", Text "another element"]
+
+exampleProgram :: IO ()
+exampleProgram = do
+  runProgram exampleInitModel exampleUpdateFn exampleViewFn Increment
+
+foreign export ccall exampleProgram :: IO ()
+
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------

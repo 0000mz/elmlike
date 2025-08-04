@@ -17,7 +17,11 @@ dist-newstyle/
 .vscode/
 .idea/
 .stack-work/
+
+# Build and Generation directories
 build/
 build_release/
+build*/
+csrc/gen/
 
 .cache/

@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cassert>
+#include <thread>
 
 #include "VkBootstrap.h"
 
@@ -21,6 +22,26 @@ struct Renderer {
   vkb::Instance vk_instance;
 };
 Renderer _renderer;
+std::thread _ui_thread;
+
+void ui_thread_start() {
+  // TODO: This crashes on MacOS because MacOS requires rendering
+  // to be done on the main thread.
+  //
+  // > 'nextEventMatchingMask should only be called from the Main
+  // > Thread!
+  //
+  // Need to have a mechanism to have the UI operate on the main
+  // thread and the elmlike runtime executing on a separate thread.
+  printf("Starting ui thread.\n");
+
+  assert(_renderer.window);
+  glfwMakeContextCurrent(_renderer.window);
+  while (!glfwWindowShouldClose(_renderer.window)) {
+    glfwSwapBuffers(_renderer.window);
+    glfwPollEvents();
+  }
+}
 
 int init_window_with_skia() {
   printf("Starting GUI.\n");
@@ -95,6 +116,7 @@ int init_window_with_skia() {
   _renderer.vk_instance = instance_ret.value();
   _renderer.vk_surface = surface;
 
+  _ui_thread = std::thread(ui_thread_start);
   return 0;
 }
 
@@ -107,6 +129,7 @@ void start_gui() {
 }
 
 void stop_gui() {
+  // TODO: Signal to the ui thread to terminate...
   if (!_renderer.window) {
     return;
   }

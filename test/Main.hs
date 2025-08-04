@@ -24,4 +24,4 @@ main :: IO ()
 main = do
   putStrLn "Running tests..."
   ElmLike.runProgram initModel updateFn viewFn Increment
-  putStrLn "Tess finished."
+  putStrLn "Test finished."
