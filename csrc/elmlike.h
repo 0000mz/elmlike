@@ -1,6 +1,8 @@
 #ifndef _ELMLIKE_H_
 #define _ELMLIKE_H_
 
+#include <functional>
+
 #if defined(__linux__) || defined(__APPLE__)
 #define EXPORT __attribute__((visibility("default")))
 #else
@@ -13,6 +15,8 @@ extern "C" {
 
 EXPORT void start_gui();
 EXPORT void stop_gui();
+
+void UiExec(std::function<void()> hs_entry);
 
 #ifdef __cplusplus
 }

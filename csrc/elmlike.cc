@@ -1,8 +1,10 @@
 #include "elmlike.h"
 
+#include <functional>
 #include <cstdio>
 #include <cassert>
 #include <thread>
+#include <unistd.h>
 
 #include "VkBootstrap.h"
 
@@ -10,7 +12,6 @@
 #include "GLFW/glfw3.h"
 
 #include <vulkan/vulkan.h>
-
 
 namespace {
 
@@ -22,25 +23,17 @@ struct Renderer {
   vkb::Instance vk_instance;
 };
 Renderer _renderer;
-std::thread _ui_thread;
+std::thread _hs_thread;
+bool _start_gui = false;
 
-void ui_thread_start() {
-  // TODO: This crashes on MacOS because MacOS requires rendering
-  // to be done on the main thread.
-  //
-  // > 'nextEventMatchingMask should only be called from the Main
-  // > Thread!
-  //
-  // Need to have a mechanism to have the UI operate on the main
-  // thread and the elmlike runtime executing on a separate thread.
-  printf("Starting ui thread.\n");
-
+void run_ui_loop() {
   assert(_renderer.window);
   glfwMakeContextCurrent(_renderer.window);
   while (!glfwWindowShouldClose(_renderer.window)) {
     glfwSwapBuffers(_renderer.window);
     glfwPollEvents();
   }
+  printf("Window closed.\n");
 }
 
 int init_window_with_skia() {
@@ -115,30 +108,41 @@ int init_window_with_skia() {
   _renderer.vk_device = device_ret.value();
   _renderer.vk_instance = instance_ret.value();
   _renderer.vk_surface = surface;
-
-  _ui_thread = std::thread(ui_thread_start);
   return 0;
 }
 
 } // namespace
 
 void start_gui() {
-  if (init_window_with_skia() != 0) {
-    assert(false);
-  }
+  _start_gui = true;
 }
 
 void stop_gui() {
-  // TODO: Signal to the ui thread to terminate...
-  if (!_renderer.window) {
-    return;
+  printf("TODO: stop_gui invoked..\n");
+  // // TODO: Signal to the ui thread to terminate...
+  // if (!_renderer.window) {
+  //   return;
+  // }
+
+  // vkb::destroy_device(_renderer.vk_device);
+  // vkb::destroy_surface(_renderer.vk_instance, _renderer.vk_surface);
+  // vkb::destroy_instance(_renderer.vk_instance);
+
+  // printf("Stopping GUI.\n");
+  // glfwDestroyWindow(_renderer.window);
+  // glfwTerminate();
+}
+
+void UiExec(std::function<void()> hs_entry) {
+  printf("[UiExec] starting hs thread.\n");
+  _hs_thread = std::thread(hs_entry);
+  // TODO: Remove this sleep lol.
+  while (!_start_gui) {
+    usleep(100'000); // 100ms
   }
-
-  vkb::destroy_device(_renderer.vk_device);
-  vkb::destroy_surface(_renderer.vk_instance, _renderer.vk_surface);
-  vkb::destroy_instance(_renderer.vk_instance);
-
-  printf("Stopping GUI.\n");
-  glfwDestroyWindow(_renderer.window);
-  glfwTerminate();
+  printf("[UiExec] received signal to start ui thread.\n");
+  init_window_with_skia();
+  run_ui_loop();
+  _hs_thread.join();
+  printf("[UiExec] stopping hs thread.\n");
 }

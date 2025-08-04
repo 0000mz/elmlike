@@ -67,7 +67,9 @@ endif()
 
 if (BUILD_WITH_HASKELL_STUB)
   add_executable(elmlike_main elmlike_main.cc)
-  target_link_libraries(elmlike_main PRIVATE elmlike_static
+  target_link_libraries(elmlike_main PRIVATE
+    elmlike_static
+
     # TODO: These libraries are needed by the archives linked in for ghc.
     # There's gotta be a way, maybe pkgconfig, to specify the ghc archives
     # as a required package so that the package's dependencies are also
