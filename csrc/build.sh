@@ -1,4 +1,27 @@
 #!/bin/sh
+# Build the ElmLike c libraries using cmake.
+#  arg1: release|debug
+#  arg2: verbose|silent
+
+VERBOSE_MAKEFILE="OFF"
+GENERATOR="Ninja"
+BUILD_DIR="build"
+BUILD_TYPE="Debug"
+
+if [[ "${1}" == "release" ]]; then
+  BUILD_TYPE="Release"
+  BUILD_DIR="build_release"
+fi
+
+if [[ "${2}" == "verbose" ]]; then
+  # Can't use Ninja to get verbose makefile output.
+  VERBOSE_MAKEFILE="ON"
+  GENERATOR="Unix Makefiles"
+fi
+
+echo "Build type: ${BUILD_TYPE}"
+echo "Build directory: ${BUILD_DIR}"
+echo ""
 
 echo "This build requires using vcpkg."
 echo "Make sure it is installed and present in your PATH."
@@ -19,7 +42,10 @@ VCPKG_DIR=$(dirname "${VCPKG_EXE}")
 
 VCPKG_TOOLCHAIN_FILE="${VCPKG_DIR}/scripts/buildsystems/vcpkg.cmake"
 
-cmake -B build -S . \
+cmake -B "${BUILD_DIR}" -S . \
   -DCMAKE_TOOLCHAIN_FILE="${VCPKG_TOOLCHAIN_FILE}" \
-  -G Ninja
-cmake --build build
+  -G "${GENERATOR}" \
+  -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+  -DCMAKE_VERBOSE_MAKEFILE="${VERBOSE_MAKEFILE}" \
+  || fail "Failed to configure with cmake"
+cmake --build "${BUILD_DIR}" || fail "Failed to build"

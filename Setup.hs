@@ -13,6 +13,12 @@ import System.FilePath ((</>))
 main :: IO ()
 main = defaultMainWithHooks customHooks
 
+cSourceDirectory :: String
+cSourceDirectory = "csrc"
+
+cBuildDirectory :: String
+cBuildDirectory = cSourceDirectory ++ "/build_release"
+
 customHooks :: UserHooks
 customHooks = simpleUserHooks {
     preBuild = preBuildHook,
@@ -23,9 +29,9 @@ preBuildHook :: Args -> BuildFlags -> IO HookedBuildInfo
 preBuildHook args buildFlags = do
     putStrLn "[PreBuild] Building C library..."
 
-    createDirectoryIfMissing True "csrc/build"
-    setCurrentDirectory "csrc"
-    rawSystem "bash" ["./build.sh"]
+    createDirectoryIfMissing True cBuildDirectory
+    setCurrentDirectory cSourceDirectory
+    rawSystem "bash" ["./build.sh", "release"]
     putStrLn "C library built successfully."
     setCurrentDirectory ".."
 
@@ -34,12 +40,10 @@ preBuildHook args buildFlags = do
 postBuildHook :: Args -> BuildFlags -> PackageDescription -> LocalBuildInfo -> IO ()
 postBuildHook args buildFlags packageDescription localBuildInfo = do
     putStrLn "[PostBuild] Copying artifacts..."
-    let csrcDir = "./csrc"
 
     let packageBuildDir = buildDir localBuildInfo
-    let cmakeBuildDir = csrcDir ++ "/build/"
     -- TODO: This name will vary depending on which os the user is building on.
     let artifactName = "libelmlike.dylib"
-    copyFile (cmakeBuildDir </> artifactName) ((getSymbolicPath packageBuildDir) </> artifactName)
+    copyFile (cBuildDirectory </> artifactName) ((getSymbolicPath packageBuildDir) </> artifactName)
 
     postBuild simpleUserHooks args buildFlags packageDescription localBuildInfo
