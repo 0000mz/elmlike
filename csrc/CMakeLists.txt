@@ -8,7 +8,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(GLFW_BUILD_DOCS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(BUILD_WITH_HASKELL_STUB "Build binaries that depend on haskell stub" OFF)
+
+option(BUILD_WITH_HASKELL_STUB "Build binaries that depend on haskell stub" OFF)
 
 if (APPLE)
   enable_language(OBJC)

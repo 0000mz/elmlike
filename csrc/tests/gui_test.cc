@@ -5,5 +5,5 @@
 
 TEST(GuiTest, RunGui) {
   start_gui();
-  sleep(5);
+  UiExec([]() {});
 }
