@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
+#include <include/core/SkColorType.h>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -30,14 +31,18 @@
 #include "skia/include/core/SkImageInfo.h"
 #include "skia/include/core/SkPaint.h"
 #include "skia/include/core/SkRect.h"
+#include "skia/include/core/SkColorSpace.h"
 #include "skia/include/core/SkRefCnt.h"
 #include "skia/include/core/SkSurface.h"
-#include "skia/include/gpu/GpuTypes.h"
+#include "skia/include/gpu/vk/VulkanBackendContext.h"
+#include "skia/include/gpu/ganesh/GrTypes.h"
+#include "skia/include/gpu/vk/VulkanTypes.h"
+#include "skia/include/gpu/ganesh/vk/GrVkTypes.h"
+#include "skia/include/gpu/ganesh/vk/GrVkBackendSurface.h"
+#include "skia/include/gpu/ganesh/GrBackendSurface.h"
 #include "skia/include/gpu/ganesh/GrDirectContext.h"
 #include "skia/include/gpu/ganesh/SkSurfaceGanesh.h"
 #include "skia/include/gpu/ganesh/vk/GrVkDirectContext.h"
-#include "skia/include/gpu/vk/VulkanBackendContext.h"
-#include "skia/include/gpu/vk/VulkanTypes.h"
 
 namespace {
 
@@ -59,10 +64,18 @@ struct Renderer {
   VkSurfaceKHR vk_surface;
   vkb::Instance vk_instance;
   VkQueue graphics_queue;
+  vkb::Swapchain swapchain;
+
+  std::vector<sk_sp<SkSurface>> skia_surfaces;
+  std::vector<VkImage> swapchain_images;
+  std::vector<VkImageView> swapchain_image_views;
+  std::vector<VkFence> fences;
+
+  VkSemaphore image_available_semaphore;
+  VkSemaphore render_finished_semaphore;
 
   // Skia resources
   sk_sp<GrDirectContext> skia_ctx;
-  sk_sp<SkSurface> skia_surface;
 
   ~Renderer();
 };
@@ -83,15 +96,31 @@ void signal_hs_shutdown() {
 void run_ui_loop(Renderer &renderer) {
   assert(renderer.window);
   glfwMakeContextCurrent(renderer.window);
+
+  uint32_t current_frame = 0;
   while (!glfwWindowShouldClose(renderer.window)) {
-    glfwSwapBuffers(renderer.window);
     glfwPollEvents();
 
-    {
-      // Test draw
-      // TODO: The draw isn't presenting anything onto the window...
-      SkCanvas *canvas = renderer.skia_surface->getCanvas();
+    vkWaitForFences(renderer.vk_device, 1, &renderer.fences[current_frame], VK_TRUE,
+                    UINT64_MAX);
+    vkResetFences(renderer.vk_device, 1, &renderer.fences[current_frame]);
 
+    uint32_t image_index;
+    VkResult result = vkAcquireNextImageKHR(
+        renderer.vk_device, renderer.swapchain, UINT64_MAX,
+        renderer.image_available_semaphore, VK_NULL_HANDLE, &image_index);
+
+    if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+      // TODO: Handle swapchain recreation
+      continue;
+    } else if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+      fprintf(stderr, "Failed to acquire swapchain image.\n");
+      break;
+    }
+
+    SkCanvas *canvas = renderer.skia_surfaces[image_index]->getCanvas();
+
+    { // Test draw
       SkPaint paint;
       paint.setColor(SK_ColorBLUE);
       paint.setStyle(SkPaint::kFill_Style);
@@ -102,6 +131,48 @@ void run_ui_loop(Renderer &renderer) {
       canvas->drawRect(rect, paint);
       renderer.skia_ctx->flushAndSubmit();
     }
+
+    VkSubmitInfo submit_info{};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+    VkSemaphore wait_semaphores[] = {renderer.image_available_semaphore};
+    VkPipelineStageFlags wait_stages[] = {
+        VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
+    submit_info.waitSemaphoreCount = 1;
+    submit_info.pWaitSemaphores = wait_semaphores;
+    submit_info.pWaitDstStageMask = wait_stages;
+    submit_info.commandBufferCount = 0;
+    submit_info.pCommandBuffers = nullptr;
+
+    VkSemaphore signal_semaphores[] = {renderer.render_finished_semaphore};
+    submit_info.signalSemaphoreCount = 1;
+    submit_info.pSignalSemaphores = signal_semaphores;
+
+    if (vkQueueSubmit(renderer.graphics_queue, 1, &submit_info,
+                      renderer.fences[current_frame]) != VK_SUCCESS) {
+      fprintf(stderr, "Failed to submit draw command buffer.\n");
+      break;
+    }
+
+    VkPresentInfoKHR present_info{};
+    present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    present_info.waitSemaphoreCount = 1;
+    present_info.pWaitSemaphores = signal_semaphores;
+
+    VkSwapchainKHR swapchains[] = {renderer.swapchain};
+    present_info.swapchainCount = 1;
+    present_info.pSwapchains = swapchains;
+    present_info.pImageIndices = &image_index;
+
+    result = vkQueuePresentKHR(renderer.graphics_queue, &present_info);
+    if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
+      // TODO: Handle swapchain recreation
+    } else if (result != VK_SUCCESS) {
+      fprintf(stderr, "Failed to present swapchain image.\n");
+      break;
+    }
+
+    current_frame = (current_frame + 1) % renderer.swapchain.image_count;
   }
   signal_hs_shutdown();
   printf("Window closed.\n");
@@ -134,7 +205,7 @@ PFN_vkVoidFunction VulkanGetProcAddr(const char *function_name,
   return (PFN_vkVoidFunction)fn3;
 }
 
-int SetupSkia(Renderer &renderer, const int width, const int height) {
+int SetupSkia(Renderer &renderer) {
   printf("Setting up skia.\n");
 
   skgpu::VulkanBackendContext bctx;
@@ -152,26 +223,58 @@ int SetupSkia(Renderer &renderer, const int width, const int height) {
     return 1;
   }
 
-  SkImageInfo info = SkImageInfo::MakeN32Premul(width, height);
-  sk_sp<SkSurface> surface =
-      SkSurfaces::RenderTarget(skia_ctx.get(), skgpu::Budgeted::kYes, info);
-  if (!surface) {
-    fprintf(stderr, "Failed to create skia surface.\n");
-    return 1;
+  // Get the swapchain images and image views
+  renderer.swapchain_images = renderer.swapchain.get_images().value();
+  renderer.swapchain_image_views =
+      renderer.swapchain.get_image_views().value();
+
+  // Create a Skia surface for each swapchain image
+  renderer.skia_surfaces.resize(renderer.swapchain.image_count);
+  for (uint32_t i = 0; i < renderer.swapchain.image_count; ++i) {
+    const uint32_t width = renderer.swapchain.extent.width;
+    const uint32_t height = renderer.swapchain.extent.height;
+
+    GrVkImageInfo vk_image_info;
+    vk_image_info.fImage = renderer.swapchain_images.at(i);
+    vk_image_info.fFormat = renderer.swapchain.image_format;
+    vk_image_info.fLevelCount = 1;
+    vk_image_info.fSampleCount = 1;
+
+    GrBackendTexture tex = GrBackendTextures::MakeVk(static_cast<int>(width),
+        static_cast<int>(height), vk_image_info);
+
+    const SkImageInfo image_info = SkImageInfo::Make(
+        static_cast<int>(width), static_cast<int>(height),
+        kBGRA_8888_SkColorType,
+        kPremul_SkAlphaType, nullptr);
+
+    sk_sp<SkSurface> surface = SkSurfaces::WrapBackendTexture(
+        skia_ctx.get(), tex,
+        GrSurfaceOrigin::kTopLeft_GrSurfaceOrigin,
+        1, // samples-per-pixel
+        image_info.colorInfo().colorType(),
+        nullptr, // color-space: todo, set
+        nullptr, nullptr);
+
+    if (!surface) {
+      fprintf(stderr, "Failed to create skia surface for swapchain image.\n");
+      return 1;
+    }
+    renderer.skia_surfaces[i] = surface;
   }
 
   renderer.skia_ctx = std::move(skia_ctx);
-  renderer.skia_surface = std::move(surface);
   printf("Successfully initialized skia.\n");
 
   return 0;
 }
 
+
 int init_window_with_skia(Renderer &renderer) {
   printf("Starting GUI.\n");
 
-  constexpr int kWidth = 800;
-  constexpr int kHeight = 600;
+  constexpr uint32_t kWidth = 800;
+  constexpr uint32_t kHeight = 600;
 
   if (!glfwInit()) {
     fprintf(stderr, "Failed to initialize glfw.\n");
@@ -283,7 +386,46 @@ int init_window_with_skia(Renderer &renderer) {
   renderer.vk_surface = surface;
   renderer.vk_physical_device = phys_ret.value();
   renderer.graphics_queue = graphics_queue_ret.value();
-  return SetupSkia(renderer, kWidth, kHeight);
+
+  vkb::SwapchainBuilder swapchain_builder{renderer.vk_device};
+  auto swapchain_ret = swapchain_builder
+    .set_desired_extent(kWidth, kHeight)
+    .set_desired_format({
+      .format = VK_FORMAT_R8G8B8A8_SRGB,
+      .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
+    })
+    .build();
+  if (!swapchain_ret) {
+    fprintf(stderr, "Failed to create swapchain: %s\n",
+            swapchain_ret.error().message().c_str());
+    return 1;
+  }
+  renderer.swapchain = swapchain_ret.value();
+
+  // Create synchronization primitives
+  VkSemaphoreCreateInfo semaphore_info{};
+  semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+  if (vkCreateSemaphore(renderer.vk_device, &semaphore_info, nullptr,
+                        &renderer.image_available_semaphore) != VK_SUCCESS ||
+      vkCreateSemaphore(renderer.vk_device, &semaphore_info, nullptr,
+                        &renderer.render_finished_semaphore) != VK_SUCCESS) {
+    fprintf(stderr, "Failed to create semaphores.\n");
+    return 1;
+  }
+
+  VkFenceCreateInfo fence_info{};
+  fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+  renderer.fences.resize(renderer.swapchain.image_count);
+  for (auto &fence : renderer.fences) {
+    if (vkCreateFence(renderer.vk_device, &fence_info, nullptr, &fence) !=
+        VK_SUCCESS) {
+      fprintf(stderr, "Failed to create fences.\n");
+      return 1;
+    }
+  }
+
+  return SetupSkia(renderer);
 }
 
 Renderer::~Renderer() {
@@ -291,6 +433,23 @@ Renderer::~Renderer() {
     return;
   }
 
+  vkDeviceWaitIdle(this->vk_device);
+
+  vkDestroySemaphore(this->vk_device, this->render_finished_semaphore, nullptr);
+  vkDestroySemaphore(this->vk_device, this->image_available_semaphore, nullptr);
+
+  for (auto &fence : this->fences) {
+    vkDestroyFence(this->vk_device, fence, nullptr);
+  }
+
+  this->skia_surfaces.clear();
+  this->skia_ctx.reset();
+
+  for (auto &image_view : this->swapchain_image_views) {
+    vkDestroyImageView(this->vk_device, image_view, nullptr);
+  }
+
+  vkb::destroy_swapchain(this->swapchain);
   vkb::destroy_device(this->vk_device);
   vkb::destroy_surface(this->vk_instance, this->vk_surface);
   vkb::destroy_instance(this->vk_instance);
