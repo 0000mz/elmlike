@@ -25,3 +25,4 @@ build*/
 csrc/gen/
 
 .cache/
+vcpkg_installed/

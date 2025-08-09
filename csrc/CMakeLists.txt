@@ -48,7 +48,8 @@ set(ELMLIKE_LIBRARY_DEPS
     glfw
     vk-bootstrap::vk-bootstrap
     vk-bootstrap::vk-bootstrap-compiler-warnings
-    Vulkan::Vulkan)
+    Vulkan::Vulkan
+)
 
 # ElmLike: Shared
 add_library(elmlike SHARED elmlike.cc)

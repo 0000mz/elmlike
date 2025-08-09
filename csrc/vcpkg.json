@@ -1,0 +1,32 @@
+{
+  "dependencies": [
+    {
+      "name": "skia",
+      "features": [
+        "vulkan"
+      ]
+    },
+    "vk-bootstrap",
+    "gtest",
+    "libiconv",
+    "libffi",
+    "gmp",
+    "vulkan",
+    "vulkan-headers",
+    "vulkan-loader",
+    "vulkan-utility-libraries",
+    "vulkan-validationlayers",
+    "volk"
+  ],
+  "overrides": [
+    {
+      "name": "vulkan",
+      "version": "1.3.268.0"
+    },
+    {
+      "name": "volk",
+      "version": "1.3.275.0"
+    }
+  ],
+  "builtin-baseline": "903956eff7cb94774a9e805ff573c000afc43e3e"
+}
