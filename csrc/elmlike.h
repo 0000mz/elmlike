@@ -15,6 +15,7 @@ extern "C" {
 
 EXPORT void start_gui();
 EXPORT int poll_event_signal();
+EXPORT void draw_text(const char *text);
 
 void UiExec(std::function<void()> hs_entry);
 

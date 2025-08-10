@@ -5,11 +5,14 @@ module ElmLike (
 
 import Control.Concurrent -- threadDelay
 import Foreign.C.Types
+import Foreign.C.String
 
 foreign import ccall "elmlike start_gui"
   _start_gui :: IO ()
 foreign import ccall "elmlike poll_event_signal"
   _poll_event_signal :: IO CInt
+foreign import ccall "elmlike draw_text"
+  _draw_text :: CString -> IO ()
 
 -- EventSignal: Keep these signal definitions in sync with
 -- the definition in the elmlike clib.
@@ -54,8 +57,8 @@ programLifecycleStep program cmd = do
       spaceConcat :: [String] -> String
       spaceConcat lst = (foldl concatWithSpace "") lst
 
-      -- TODO: Instead of print to console, draw this to the render surface.
-      in putStrLn (spaceConcat combined_widgets)
+      in withCString (spaceConcat combined_widgets) $ \cstr -> do
+        _draw_text cstr
 
   do
     signal_raw <- _poll_event_signal

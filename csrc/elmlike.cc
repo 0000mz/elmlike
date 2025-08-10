@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
-#include <include/core/SkColorType.h>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -27,22 +26,30 @@
 
 #include "skia/include/core/SkCanvas.h"
 #include "skia/include/core/SkColor.h"
+#include "skia/include/core/SkColorSpace.h"
+#include "skia/include/core/SkColorType.h"
+#include "skia/include/core/SkFont.h"
+#include "skia/include/core/SkFontMgr.h"
+#include "skia/include/core/SkFontStyle.h"
 #include "skia/include/core/SkImage.h"
 #include "skia/include/core/SkImageInfo.h"
 #include "skia/include/core/SkPaint.h"
 #include "skia/include/core/SkRect.h"
-#include "skia/include/core/SkColorSpace.h"
 #include "skia/include/core/SkRefCnt.h"
+#include "skia/include/core/SkString.h"
 #include "skia/include/core/SkSurface.h"
-#include "skia/include/gpu/vk/VulkanBackendContext.h"
-#include "skia/include/gpu/ganesh/GrTypes.h"
-#include "skia/include/gpu/vk/VulkanTypes.h"
-#include "skia/include/gpu/ganesh/vk/GrVkTypes.h"
-#include "skia/include/gpu/ganesh/vk/GrVkBackendSurface.h"
+#include "skia/include/core/SkTextBlob.h"
+#include "skia/include/core/SkTypeface.h"
 #include "skia/include/gpu/ganesh/GrBackendSurface.h"
 #include "skia/include/gpu/ganesh/GrDirectContext.h"
+#include "skia/include/gpu/ganesh/GrTypes.h"
 #include "skia/include/gpu/ganesh/SkSurfaceGanesh.h"
+#include "skia/include/gpu/ganesh/vk/GrVkBackendSurface.h"
 #include "skia/include/gpu/ganesh/vk/GrVkDirectContext.h"
+#include "skia/include/gpu/ganesh/vk/GrVkTypes.h"
+#include "skia/include/gpu/vk/VulkanBackendContext.h"
+#include "skia/include/gpu/vk/VulkanTypes.h"
+#include "skia/include/ports/SkFontMgr_mac_ct.h"
 
 namespace {
 
@@ -89,6 +96,10 @@ std::queue<EventSignal> _event_queue;
 std::mutex _event_queue_mutex;
 std::thread _hs_thread;
 bool _start_gui = false;
+// TODO: Make use of llvm's mutex sync annotations to ensure
+// these variables are only ever accessed when the mutex is held.
+std::string _text_to_draw;
+std::mutex _text_to_draw_mutex;
 // }
 
 void signal_hs_shutdown() {
@@ -100,12 +111,18 @@ void run_ui_loop(Renderer &renderer) {
   assert(renderer.window);
   glfwMakeContextCurrent(renderer.window);
 
+  sk_sp<SkFontMgr> font_manager = SkFontMgr_New_CoreText(nullptr);
+  if (!font_manager) {
+    fprintf(stderr, "Failed to load font manager.\n");
+    return;
+  }
+
   uint32_t current_frame = 0;
   while (!glfwWindowShouldClose(renderer.window)) {
     glfwPollEvents();
 
-    vkWaitForFences(renderer.vk_device, 1, &renderer.fences[current_frame], VK_TRUE,
-                    UINT64_MAX);
+    vkWaitForFences(renderer.vk_device, 1, &renderer.fences[current_frame],
+                    VK_TRUE, UINT64_MAX);
     vkResetFences(renderer.vk_device, 1, &renderer.fences[current_frame]);
     vkQueueWaitIdle(renderer.graphics_queue);
     vkResetCommandBuffer(renderer.command_buffer, 0);
@@ -113,7 +130,8 @@ void run_ui_loop(Renderer &renderer) {
     uint32_t image_index;
     VkResult result = vkAcquireNextImageKHR(
         renderer.vk_device, renderer.swapchain, UINT64_MAX,
-        renderer.image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
+        renderer.image_available_semaphores[current_frame], VK_NULL_HANDLE,
+        &image_index);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
       // TODO: Handle swapchain recreation
@@ -132,7 +150,8 @@ void run_ui_loop(Renderer &renderer) {
 
     VkImageMemoryBarrier initial_barrier{};
     initial_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    initial_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; // Or VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+    initial_barrier.oldLayout =
+        VK_IMAGE_LAYOUT_UNDEFINED; // Or VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
     initial_barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     initial_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     initial_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -147,8 +166,8 @@ void run_ui_loop(Renderer &renderer) {
 
     vkCmdPipelineBarrier(renderer.command_buffer,
                          VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &initial_barrier);
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0,
+                         nullptr, 0, nullptr, 1, &initial_barrier);
 
     vkEndCommandBuffer(renderer.command_buffer);
 
@@ -158,11 +177,14 @@ void run_ui_loop(Renderer &renderer) {
     submit_info_initial.pCommandBuffers = &renderer.command_buffer;
 
     // Submit the initial transition command buffer
-    if (vkQueueSubmit(renderer.graphics_queue, 1, &submit_info_initial, VK_NULL_HANDLE) != VK_SUCCESS) {
-        fprintf(stderr, "Failed to submit initial layout transition command buffer.\n");
-        break;
+    if (vkQueueSubmit(renderer.graphics_queue, 1, &submit_info_initial,
+                      VK_NULL_HANDLE) != VK_SUCCESS) {
+      fprintf(stderr,
+              "Failed to submit initial layout transition command buffer.\n");
+      break;
     }
-    vkQueueWaitIdle(renderer.graphics_queue); // Wait for the transition to complete
+    vkQueueWaitIdle(
+        renderer.graphics_queue); // Wait for the transition to complete
 
     // Skia drawing
     SkCanvas *canvas = renderer.skia_surfaces[image_index]->getCanvas();
@@ -173,9 +195,34 @@ void run_ui_loop(Renderer &renderer) {
       paint.setStyle(SkPaint::kFill_Style);
       paint.setAntiAlias(true);
 
-      SkRect rect = SkRect::MakeXYWH(50, 50, 100, 100);
+      {
+        std::scoped_lock l(_text_to_draw_mutex);
+        // TODO: opt - save the typeface in state instead of querying it every
+        // frame.
+        sk_sp<SkTypeface> first_typeface =
+            std::invoke([&font_manager]() -> sk_sp<SkTypeface> {
+              const int nb_font_families = font_manager->countFamilies();
+              for (int i = 0; i < nb_font_families; ++i) {
+                SkString family_name;
+                font_manager->getFamilyName(i, &family_name);
+                sk_sp<SkTypeface> typeface = font_manager->matchFamilyStyle(
+                    family_name.c_str(), SkFontStyle::Normal());
+                if (typeface)
+                  return typeface;
+              }
+              return nullptr;
+            });
+        if (!first_typeface) {
+          fprintf(stderr, "Failed to load font typeface.\n");
+          return;
+        }
+        SkFont font(first_typeface, 24.0f);
+        sk_sp<SkTextBlob> text_blob = SkTextBlob::MakeFromText(
+            _text_to_draw.c_str(), _text_to_draw.size(), font);
+        canvas->drawTextBlob(text_blob.get(), 100, 100, paint);
+      }
 
-      canvas->drawRect(rect, paint);
+      // canvas->drawRect(rect, paint);
       renderer.skia_ctx->flushAndSubmit();
     }
 
@@ -214,16 +261,19 @@ void run_ui_loop(Renderer &renderer) {
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    VkSemaphore wait_semaphores[] = {renderer.image_available_semaphores[current_frame]};
+    VkSemaphore wait_semaphores[] = {
+        renderer.image_available_semaphores[current_frame]};
     VkPipelineStageFlags wait_stages[] = {
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     submit_info.waitSemaphoreCount = 1;
     submit_info.pWaitSemaphores = wait_semaphores;
     submit_info.pWaitDstStageMask = wait_stages;
     submit_info.commandBufferCount = 1; // Now submitting one command buffer
-    submit_info.pCommandBuffers = &renderer.command_buffer; // Our command buffer
+    submit_info.pCommandBuffers =
+        &renderer.command_buffer; // Our command buffer
 
-    VkSemaphore signal_semaphores[] = {renderer.render_finished_semaphores[current_frame]};
+    VkSemaphore signal_semaphores[] = {
+        renderer.render_finished_semaphores[current_frame]};
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = signal_semaphores;
 
@@ -304,8 +354,7 @@ int SetupSkia(Renderer &renderer) {
 
   // Get the swapchain images and image views
   renderer.swapchain_images = renderer.swapchain.get_images().value();
-  renderer.swapchain_image_views =
-      renderer.swapchain.get_image_views().value();
+  renderer.swapchain_image_views = renderer.swapchain.get_image_views().value();
 
   // Create a Skia surface for each swapchain image
   renderer.skia_surfaces.resize(renderer.swapchain.image_count);
@@ -319,17 +368,15 @@ int SetupSkia(Renderer &renderer) {
     vk_image_info.fLevelCount = 1;
     vk_image_info.fSampleCount = 1;
 
-    GrBackendTexture tex = GrBackendTextures::MakeVk(static_cast<int>(width),
-        static_cast<int>(height), vk_image_info);
+    GrBackendTexture tex = GrBackendTextures::MakeVk(
+        static_cast<int>(width), static_cast<int>(height), vk_image_info);
 
-    const SkImageInfo image_info = SkImageInfo::Make(
-        static_cast<int>(width), static_cast<int>(height),
-        kBGRA_8888_SkColorType,
-        kPremul_SkAlphaType, nullptr);
+    const SkImageInfo image_info =
+        SkImageInfo::Make(static_cast<int>(width), static_cast<int>(height),
+                          kBGRA_8888_SkColorType, kPremul_SkAlphaType, nullptr);
 
     sk_sp<SkSurface> surface = SkSurfaces::WrapBackendTexture(
-        skia_ctx.get(), tex,
-        GrSurfaceOrigin::kTopLeft_GrSurfaceOrigin,
+        skia_ctx.get(), tex, GrSurfaceOrigin::kTopLeft_GrSurfaceOrigin,
         1, // samples-per-pixel
         image_info.colorInfo().colorType(),
         nullptr, // color-space: todo, set
@@ -347,7 +394,6 @@ int SetupSkia(Renderer &renderer) {
 
   return 0;
 }
-
 
 int init_window_with_skia(Renderer &renderer) {
   printf("Starting GUI.\n");
@@ -467,14 +513,13 @@ int init_window_with_skia(Renderer &renderer) {
   renderer.graphics_queue = graphics_queue_ret.value();
 
   vkb::SwapchainBuilder swapchain_builder{renderer.vk_device};
-  auto swapchain_ret = swapchain_builder
-    .set_desired_extent(kWidth, kHeight)
-    .add_image_usage_flags(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-    .set_desired_format({
-      .format = VK_FORMAT_R8G8B8A8_SRGB,
-      .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
-    })
-    .build();
+  auto swapchain_ret =
+      swapchain_builder.set_desired_extent(kWidth, kHeight)
+          .add_image_usage_flags(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                                 VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+          .set_desired_format({.format = VK_FORMAT_R8G8B8A8_SRGB,
+                               .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
+          .build();
   if (!swapchain_ret) {
     fprintf(stderr, "Failed to create swapchain: %s\n",
             swapchain_ret.error().message().c_str());
@@ -490,9 +535,11 @@ int init_window_with_skia(Renderer &renderer) {
   semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
   for (size_t i = 0; i < renderer.swapchain.image_count; i++) {
     if (vkCreateSemaphore(renderer.vk_device, &semaphore_info, nullptr,
-                          &renderer.image_available_semaphores[i]) != VK_SUCCESS ||
+                          &renderer.image_available_semaphores[i]) !=
+            VK_SUCCESS ||
         vkCreateSemaphore(renderer.vk_device, &semaphore_info, nullptr,
-                          &renderer.render_finished_semaphores[i]) != VK_SUCCESS) {
+                          &renderer.render_finished_semaphores[i]) !=
+            VK_SUCCESS) {
       fprintf(stderr, "Failed to create semaphores for a frame.\n");
       return 1;
     }
@@ -510,19 +557,23 @@ int init_window_with_skia(Renderer &renderer) {
     }
   }
 
-
   // Create command pool
-  const std::vector<VkQueueFamilyProperties> queue_families = renderer.vk_physical_device.get_queue_families();
-  auto graphics_queue_itr = std::find_if(queue_families.begin(), queue_families.end(), [](const VkQueueFamilyProperties& qfprop) {
-    return qfprop.queueFlags & VK_QUEUE_GRAPHICS_BIT;
-  });
+  const std::vector<VkQueueFamilyProperties> queue_families =
+      renderer.vk_physical_device.get_queue_families();
+  auto graphics_queue_itr =
+      std::find_if(queue_families.begin(), queue_families.end(),
+                   [](const VkQueueFamilyProperties &qfprop) {
+                     return qfprop.queueFlags & VK_QUEUE_GRAPHICS_BIT;
+                   });
   if (graphics_queue_itr == queue_families.end()) {
-    fprintf(stderr, "Could not find graphics queue family on physical device.\n");
+    fprintf(stderr,
+            "Could not find graphics queue family on physical device.\n");
     return 1;
   }
   VkCommandPoolCreateInfo pool_info{};
   pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-  pool_info.queueFamilyIndex = static_cast<uint32_t>(std::distance(queue_families.begin(), graphics_queue_itr));
+  pool_info.queueFamilyIndex = static_cast<uint32_t>(
+      std::distance(queue_families.begin(), graphics_queue_itr));
   pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 
   if (vkCreateCommandPool(renderer.vk_device, &pool_info, nullptr,
@@ -620,4 +671,9 @@ void UiExec(std::function<void()> hs_entry) {
   run_ui_loop(*renderer);
   _hs_thread.join();
   printf("[UiExec] stopping hs thread.\n");
+}
+
+void draw_text(const char *text) {
+  std::scoped_lock l(_text_to_draw_mutex);
+  _text_to_draw = std::string(text);
 }
