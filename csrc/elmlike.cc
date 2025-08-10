@@ -74,6 +74,9 @@ struct Renderer {
   std::vector<VkSemaphore> image_available_semaphores;
   std::vector<VkSemaphore> render_finished_semaphores;
 
+  VkCommandPool command_pool;
+  VkCommandBuffer command_buffer;
+
   // Skia resources
   sk_sp<GrDirectContext> skia_ctx;
 
@@ -104,6 +107,8 @@ void run_ui_loop(Renderer &renderer) {
     vkWaitForFences(renderer.vk_device, 1, &renderer.fences[current_frame], VK_TRUE,
                     UINT64_MAX);
     vkResetFences(renderer.vk_device, 1, &renderer.fences[current_frame]);
+    vkQueueWaitIdle(renderer.graphics_queue);
+    vkResetCommandBuffer(renderer.command_buffer, 0);
 
     uint32_t image_index;
     VkResult result = vkAcquireNextImageKHR(
@@ -132,6 +137,36 @@ void run_ui_loop(Renderer &renderer) {
       renderer.skia_ctx->flushAndSubmit();
     }
 
+    // Begin recording to the command buffer
+    VkCommandBufferBeginInfo begin_info{};
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(renderer.command_buffer, &begin_info);
+
+    // Image memory barrier to transition layout for presentation
+    VkImageMemoryBarrier image_barrier{};
+    image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    image_barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    image_barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    image_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    image_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    image_barrier.image = renderer.swapchain_images[image_index];
+    image_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    image_barrier.subresourceRange.baseMipLevel = 0;
+    image_barrier.subresourceRange.levelCount = 1;
+    image_barrier.subresourceRange.baseArrayLayer = 0;
+    image_barrier.subresourceRange.layerCount = 1;
+    image_barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    image_barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+
+    vkCmdPipelineBarrier(renderer.command_buffer,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                         VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &image_barrier);
+
+    vkEndCommandBuffer(renderer.command_buffer);
+
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
@@ -141,8 +176,8 @@ void run_ui_loop(Renderer &renderer) {
     submit_info.waitSemaphoreCount = 1;
     submit_info.pWaitSemaphores = wait_semaphores;
     submit_info.pWaitDstStageMask = wait_stages;
-    submit_info.commandBufferCount = 0;
-    submit_info.pCommandBuffers = nullptr;
+    submit_info.commandBufferCount = 1; // Now submitting one command buffer
+    submit_info.pCommandBuffers = &renderer.command_buffer; // Our command buffer
 
     VkSemaphore signal_semaphores[] = {renderer.render_finished_semaphores[current_frame]};
     submit_info.signalSemaphoreCount = 1;
@@ -172,6 +207,7 @@ void run_ui_loop(Renderer &renderer) {
       break;
     }
 
+    printf("Submitted frame idx %u\n", current_frame); sleep(3);
     current_frame = (current_frame + 1) % renderer.swapchain.image_count;
   }
   signal_hs_shutdown();
@@ -390,6 +426,7 @@ int init_window_with_skia(Renderer &renderer) {
   vkb::SwapchainBuilder swapchain_builder{renderer.vk_device};
   auto swapchain_ret = swapchain_builder
     .set_desired_extent(kWidth, kHeight)
+    .add_image_usage_flags(VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
     .set_desired_format({
       .format = VK_FORMAT_R8G8B8A8_SRGB,
       .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR
@@ -430,6 +467,40 @@ int init_window_with_skia(Renderer &renderer) {
     }
   }
 
+
+  // Create command pool
+  const std::vector<VkQueueFamilyProperties> queue_families = renderer.vk_physical_device.get_queue_families();
+  auto graphics_queue_itr = std::find_if(queue_families.begin(), queue_families.end(), [](const VkQueueFamilyProperties& qfprop) {
+    return qfprop.queueFlags & VK_QUEUE_GRAPHICS_BIT;
+  });
+  if (graphics_queue_itr == queue_families.end()) {
+    fprintf(stderr, "Could not find graphics queue family on physical device.\n");
+    return 1;
+  }
+  VkCommandPoolCreateInfo pool_info{};
+  pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+  pool_info.queueFamilyIndex = static_cast<uint32_t>(std::distance(queue_families.begin(), graphics_queue_itr));
+  pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+
+  if (vkCreateCommandPool(renderer.vk_device, &pool_info, nullptr,
+                          &renderer.command_pool) != VK_SUCCESS) {
+    fprintf(stderr, "Failed to create command pool.\n");
+    return 1;
+  }
+
+  // Allocate command buffer
+  VkCommandBufferAllocateInfo alloc_info{};
+  alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  alloc_info.commandPool = renderer.command_pool;
+  alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  alloc_info.commandBufferCount = 1;
+
+  if (vkAllocateCommandBuffers(renderer.vk_device, &alloc_info,
+                               &renderer.command_buffer) != VK_SUCCESS) {
+    fprintf(stderr, "Failed to allocate command buffers.\n");
+    return 1;
+  }
+
   return SetupSkia(renderer);
 }
 
@@ -453,6 +524,8 @@ Renderer::~Renderer() {
 
   this->skia_surfaces.clear();
   this->skia_ctx.reset();
+
+  vkDestroyCommandPool(this->vk_device, this->command_pool, nullptr);
 
   for (auto &image_view : this->swapchain_image_views) {
     vkDestroyImageView(this->vk_device, image_view, nullptr);
