@@ -188,6 +188,7 @@ void run_ui_loop(Renderer &renderer) {
 
     // Skia drawing
     SkCanvas *canvas = renderer.skia_surfaces[image_index]->getCanvas();
+    canvas->clear(SK_ColorWHITE);
 
     { // Test draw
       SkPaint paint;
