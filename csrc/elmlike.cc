@@ -71,8 +71,8 @@ struct Renderer {
   std::vector<VkImageView> swapchain_image_views;
   std::vector<VkFence> fences;
 
-  VkSemaphore image_available_semaphore;
-  VkSemaphore render_finished_semaphore;
+  std::vector<VkSemaphore> image_available_semaphores;
+  std::vector<VkSemaphore> render_finished_semaphores;
 
   // Skia resources
   sk_sp<GrDirectContext> skia_ctx;
@@ -108,7 +108,7 @@ void run_ui_loop(Renderer &renderer) {
     uint32_t image_index;
     VkResult result = vkAcquireNextImageKHR(
         renderer.vk_device, renderer.swapchain, UINT64_MAX,
-        renderer.image_available_semaphore, VK_NULL_HANDLE, &image_index);
+        renderer.image_available_semaphores[current_frame], VK_NULL_HANDLE, &image_index);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
       // TODO: Handle swapchain recreation
@@ -135,7 +135,7 @@ void run_ui_loop(Renderer &renderer) {
     VkSubmitInfo submit_info{};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    VkSemaphore wait_semaphores[] = {renderer.image_available_semaphore};
+    VkSemaphore wait_semaphores[] = {renderer.image_available_semaphores[current_frame]};
     VkPipelineStageFlags wait_stages[] = {
         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     submit_info.waitSemaphoreCount = 1;
@@ -144,7 +144,7 @@ void run_ui_loop(Renderer &renderer) {
     submit_info.commandBufferCount = 0;
     submit_info.pCommandBuffers = nullptr;
 
-    VkSemaphore signal_semaphores[] = {renderer.render_finished_semaphore};
+    VkSemaphore signal_semaphores[] = {renderer.render_finished_semaphores[current_frame]};
     submit_info.signalSemaphoreCount = 1;
     submit_info.pSignalSemaphores = signal_semaphores;
 
@@ -403,14 +403,19 @@ int init_window_with_skia(Renderer &renderer) {
   renderer.swapchain = swapchain_ret.value();
 
   // Create synchronization primitives
+  renderer.image_available_semaphores.resize(renderer.swapchain.image_count);
+  renderer.render_finished_semaphores.resize(renderer.swapchain.image_count);
+
   VkSemaphoreCreateInfo semaphore_info{};
   semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-  if (vkCreateSemaphore(renderer.vk_device, &semaphore_info, nullptr,
-                        &renderer.image_available_semaphore) != VK_SUCCESS ||
-      vkCreateSemaphore(renderer.vk_device, &semaphore_info, nullptr,
-                        &renderer.render_finished_semaphore) != VK_SUCCESS) {
-    fprintf(stderr, "Failed to create semaphores.\n");
-    return 1;
+  for (size_t i = 0; i < renderer.swapchain.image_count; i++) {
+    if (vkCreateSemaphore(renderer.vk_device, &semaphore_info, nullptr,
+                          &renderer.image_available_semaphores[i]) != VK_SUCCESS ||
+        vkCreateSemaphore(renderer.vk_device, &semaphore_info, nullptr,
+                          &renderer.render_finished_semaphores[i]) != VK_SUCCESS) {
+      fprintf(stderr, "Failed to create semaphores for a frame.\n");
+      return 1;
+    }
   }
 
   VkFenceCreateInfo fence_info{};
@@ -435,8 +440,12 @@ Renderer::~Renderer() {
 
   vkDeviceWaitIdle(this->vk_device);
 
-  vkDestroySemaphore(this->vk_device, this->render_finished_semaphore, nullptr);
-  vkDestroySemaphore(this->vk_device, this->image_available_semaphore, nullptr);
+  for (auto &semaphore : this->render_finished_semaphores) {
+    vkDestroySemaphore(this->vk_device, semaphore, nullptr);
+  }
+  for (auto &semaphore : this->image_available_semaphores) {
+    vkDestroySemaphore(this->vk_device, semaphore, nullptr);
+  }
 
   for (auto &fence : this->fences) {
     vkDestroyFence(this->vk_device, fence, nullptr);
