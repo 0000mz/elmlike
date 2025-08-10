@@ -123,6 +123,48 @@ void run_ui_loop(Renderer &renderer) {
       break;
     }
 
+    // NEW: Command buffer for initial layout transition for Skia
+    VkCommandBufferBeginInfo begin_info_initial{};
+    begin_info_initial.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info_initial.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vkBeginCommandBuffer(renderer.command_buffer, &begin_info_initial);
+
+    VkImageMemoryBarrier initial_barrier{};
+    initial_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    initial_barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED; // Or VK_IMAGE_LAYOUT_PRESENT_SRC_KHR
+    initial_barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    initial_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    initial_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    initial_barrier.image = renderer.swapchain_images[image_index];
+    initial_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    initial_barrier.subresourceRange.baseMipLevel = 0;
+    initial_barrier.subresourceRange.levelCount = 1;
+    initial_barrier.subresourceRange.baseArrayLayer = 0;
+    initial_barrier.subresourceRange.layerCount = 1;
+    initial_barrier.srcAccessMask = 0;
+    initial_barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+    vkCmdPipelineBarrier(renderer.command_buffer,
+                         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                         VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &initial_barrier);
+
+    vkEndCommandBuffer(renderer.command_buffer);
+
+    VkSubmitInfo submit_info_initial{};
+    submit_info_initial.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info_initial.commandBufferCount = 1;
+    submit_info_initial.pCommandBuffers = &renderer.command_buffer;
+
+    // Submit the initial transition command buffer
+    if (vkQueueSubmit(renderer.graphics_queue, 1, &submit_info_initial, VK_NULL_HANDLE) != VK_SUCCESS) {
+        fprintf(stderr, "Failed to submit initial layout transition command buffer.\n");
+        break;
+    }
+    vkQueueWaitIdle(renderer.graphics_queue); // Wait for the transition to complete
+
+    // Skia drawing
     SkCanvas *canvas = renderer.skia_surfaces[image_index]->getCanvas();
 
     { // Test draw
@@ -137,33 +179,35 @@ void run_ui_loop(Renderer &renderer) {
       renderer.skia_ctx->flushAndSubmit();
     }
 
-    // Begin recording to the command buffer
-    VkCommandBufferBeginInfo begin_info{};
-    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    // Now, record the command buffer for presentation barrier
+    vkResetCommandBuffer(renderer.command_buffer, 0); // Reset for reuse
 
-    vkBeginCommandBuffer(renderer.command_buffer, &begin_info);
+    VkCommandBufferBeginInfo begin_info_present{};
+    begin_info_present.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info_present.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    // Image memory barrier to transition layout for presentation
-    VkImageMemoryBarrier image_barrier{};
-    image_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    image_barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    image_barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    image_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    image_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    image_barrier.image = renderer.swapchain_images[image_index];
-    image_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    image_barrier.subresourceRange.baseMipLevel = 0;
-    image_barrier.subresourceRange.levelCount = 1;
-    image_barrier.subresourceRange.baseArrayLayer = 0;
-    image_barrier.subresourceRange.layerCount = 1;
-    image_barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-    image_barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+    vkBeginCommandBuffer(renderer.command_buffer, &begin_info_present);
+
+    // Existing: Image memory barrier to transition layout for presentation
+    VkImageMemoryBarrier present_barrier{};
+    present_barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    present_barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    present_barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    present_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    present_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    present_barrier.image = renderer.swapchain_images[image_index];
+    present_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    present_barrier.subresourceRange.baseMipLevel = 0;
+    present_barrier.subresourceRange.levelCount = 1;
+    present_barrier.subresourceRange.baseArrayLayer = 0;
+    present_barrier.subresourceRange.layerCount = 1;
+    present_barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+    present_barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
 
     vkCmdPipelineBarrier(renderer.command_buffer,
                          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
                          VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &image_barrier);
+                         nullptr, 1, &present_barrier);
 
     vkEndCommandBuffer(renderer.command_buffer);
 
@@ -207,7 +251,6 @@ void run_ui_loop(Renderer &renderer) {
       break;
     }
 
-    printf("Submitted frame idx %u\n", current_frame); sleep(3);
     current_frame = (current_frame + 1) % renderer.swapchain.image_count;
   }
   signal_hs_shutdown();
