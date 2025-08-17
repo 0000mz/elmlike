@@ -636,11 +636,7 @@ Renderer::~Renderer() {
   glfwTerminate();
 }
 
-} // namespace
-
-void start_gui() { _start_gui = true; }
-
-EventSignal _poll_event_signal() {
+EventSignal PollEventSignalInternal() {
   usleep(100'000);
   std::scoped_lock l(_event_queue_mutex);
   if (_event_queue.empty()) {
@@ -651,7 +647,11 @@ EventSignal _poll_event_signal() {
   return sig;
 }
 
-int poll_event_signal() { return static_cast<int>(_poll_event_signal()); }
+} // namespace
+
+void StartGui() { _start_gui = true; }
+
+int PollEventSignal() { return static_cast<int>(PollEventSignalInternal()); }
 
 void UiExec(std::function<void()> hs_entry) {
   printf("[UiExec] starting hs thread.\n");
@@ -674,7 +674,8 @@ void UiExec(std::function<void()> hs_entry) {
   printf("[UiExec] stopping hs thread.\n");
 }
 
-void draw_text(const char *text) {
+// TODO: Delete this function.
+void DrawText(const char *text) {
   std::scoped_lock l(_text_to_draw_mutex);
   _text_to_draw = std::string(text);
 }
@@ -689,7 +690,7 @@ struct UiNode {
   void *priv;
 };
 
-void* makeTextNode(const char *content, uint32_t size) {
+void* MakeTextNode(const char *content, uint32_t size) {
   // TODO: Refactor this node system to not do allocations.. these allocations
   // will happen every re-render.
   auto text = std::make_unique<TextNode>();
@@ -701,7 +702,7 @@ void* makeTextNode(const char *content, uint32_t size) {
   return reinterpret_cast<void *>(new_node.release());
 }
 
-void connectNodesAtSameLevel(void *left_opaq, void *right_opaq) {
+void ConnectNodesAtSameLevel(void *left_opaq, void *right_opaq) {
   UiNode *left = reinterpret_cast<UiNode *>(left_opaq);
   UiNode *right = reinterpret_cast<UiNode *>(right_opaq);
   assert(left);
@@ -714,7 +715,7 @@ void connectNodesAtSameLevel(void *left_opaq, void *right_opaq) {
   }
 }
 
-void drawNodes(void *head_opaq) {
+void DrawNodes(void *head_opaq) {
   assert(head_opaq);
 
   UiNode *node = reinterpret_cast<UiNode *>(head_opaq);

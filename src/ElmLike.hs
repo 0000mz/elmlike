@@ -12,18 +12,16 @@ import Foreign.Ptr
 
 type UiNodePtr = Ptr ()
 
-foreign import ccall "elmlike start_gui"
-  _start_gui :: IO ()
-foreign import ccall "elmlike poll_event_signal"
-  _poll_event_signal :: IO CInt
-foreign import ccall "elmlike draw_text"
-  _draw_text :: CString -> IO ()
-foreign import ccall "elmlike makeTextNode"
-  _makeTextNode :: CString -> Word32 -> IO UiNodePtr
-foreign import ccall "elmlike connectNodesAtSameLevel"
-  _connectNodesAtSameLevel :: UiNodePtr -> UiNodePtr -> IO ()
-foreign import ccall "elmlike drawNodes"
-  _drawNodes :: UiNodePtr -> IO ()
+foreign import ccall "elmlike StartGui"
+  _StartGui :: IO ()
+foreign import ccall "elmlike PollEventSignal"
+  _PollEventSignal :: IO CInt
+foreign import ccall "elmlike MakeTextNode"
+  _MakeTextNode :: CString -> Word32 -> IO UiNodePtr
+foreign import ccall "elmlike ConnectNodesAtSameLevel"
+  _ConnectNodesAtSameLevel :: UiNodePtr -> UiNodePtr -> IO ()
+foreign import ccall "elmlike DrawNodes"
+  _DrawNodes :: UiNodePtr -> IO ()
 
 -- EventSignal: Keep these signal definitions in sync with
 -- the definition in the elmlike clib.
@@ -50,7 +48,7 @@ data Program model_type command_type = Program {
 --   `viewFn` controls the visual representation of the program based on the state.
 runProgram :: model_type -> (model_type -> command_type -> model_type) -> (model_type -> [Widget]) -> command_type -> IO ()
 runProgram initialModel updateFn viewFn cmd = do
-  _start_gui
+  _StartGui
 
   programLifecycleStep (Program {
     model    = initialModel,
@@ -67,11 +65,11 @@ programLifecycleStep program cmd = do
         if (length all_widget_ui_nodes) > 0
           then do
             head_node <- (all_widget_ui_nodes !! 0)
-            _drawNodes head_node
+            _DrawNodes head_node
           else pure ()
 
   do
-    signal_raw <- _poll_event_signal
+    signal_raw <- _PollEventSignal
     let
       signal = intToEventSignal signal_raw
       in case signal of
@@ -107,7 +105,7 @@ connectNodesAtSameLevel :: IO UiNodePtr -> IO UiNodePtr -> IO ()
 connectNodesAtSameLevel left right = do
   nleft <- left
   nright <- right
-  _connectNodesAtSameLevel nleft nright
+  _ConnectNodesAtSameLevel nleft nright
 
 -- Returns true if `idx` is within the bounds of `arr`.
 in_bounds :: [a] -> Int -> Bool
@@ -115,7 +113,7 @@ in_bounds arr idx = idx < (length arr)
 
 convertWidgetToNode :: Widget -> IO UiNodePtr
 convertWidgetToNode (Text content) = withCString content $ \content_cstr -> do
-  ui_node_ptr <- _makeTextNode content_cstr 24
+  ui_node_ptr <- _MakeTextNode content_cstr 24
   return ui_node_ptr
 convertWidgetToNode  (Button _ _) = convertWidgetToNode (Text "button placeholder")
 

@@ -14,19 +14,19 @@
 extern "C" {
 #endif
 
-EXPORT void start_gui();
-EXPORT int poll_event_signal();
-EXPORT void draw_text(const char *text);
+EXPORT void StartGui();
+EXPORT int PollEventSignal();
+EXPORT void DrawText(const char *text);
 
 void UiExec(std::function<void()> hs_entry);
 
 // Creates a text node.
 // Returns an opaque ptr to the newly created node.
-EXPORT void *makeTextNode(const char *content, uint32_t size);
+EXPORT void *MakeTextNode(const char *content, uint32_t size);
 // Connects the left and right node to each other, making left node
 // ordered to the left or right. Left's current right becomes right's right.
-EXPORT void connectNodesAtSameLevel(void *left_opaq, void *right_opaq);
-EXPORT void drawNodes(void *head_opaq);
+EXPORT void ConnectNodesAtSameLevel(void *left_opaq, void *right_opaq);
+EXPORT void DrawNodes(void *head_opaq);
 
 #ifdef __cplusplus
 }

@@ -4,6 +4,6 @@
 #include "elmlike.h"
 
 TEST(GuiTest, RunGui) {
-  start_gui();
+  StartGui();
   UiExec([]() {});
 }
