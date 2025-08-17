@@ -42,13 +42,18 @@ pkg_check_modules(gmp REQUIRED IMPORTED_TARGET gmp)
 
 ######################################################
 ### ElmLike C Lib
+add_library(renderer STATIC renderer.cc)
+target_link_libraries(renderer PRIVATE
+  unofficial::skia::skia
+  glfw
+  vk-bootstrap::vk-bootstrap
+  vk-bootstrap::vk-bootstrap-compiler-warnings
+  Vulkan::Vulkan
+)
+
 set(ELMLIKE_LIBRARY_DEPS
     SDL3::SDL3
-    unofficial::skia::skia
-    glfw
-    vk-bootstrap::vk-bootstrap
-    vk-bootstrap::vk-bootstrap-compiler-warnings
-    Vulkan::Vulkan
+    renderer
 )
 
 # ElmLike: Shared

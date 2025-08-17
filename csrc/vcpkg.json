@@ -2,9 +2,7 @@
   "dependencies": [
     {
       "name": "skia",
-      "features": [
-        "vulkan"
-      ]
+      "features": ["vulkan"]
     },
     "vk-bootstrap",
     "gtest",
