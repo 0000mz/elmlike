@@ -4,8 +4,13 @@ module ElmLike (
 ) where
 
 import Control.Concurrent -- threadDelay
-import Foreign.C.Types
+import Data.Ix
+import Data.Word -- Word32
 import Foreign.C.String
+import Foreign.C.Types
+import Foreign.Ptr
+
+type UiNodePtr = Ptr ()
 
 foreign import ccall "elmlike start_gui"
   _start_gui :: IO ()
@@ -13,6 +18,12 @@ foreign import ccall "elmlike poll_event_signal"
   _poll_event_signal :: IO CInt
 foreign import ccall "elmlike draw_text"
   _draw_text :: CString -> IO ()
+foreign import ccall "elmlike makeTextNode"
+  _makeTextNode :: CString -> Word32 -> IO UiNodePtr
+foreign import ccall "elmlike connectNodesAtSameLevel"
+  _connectNodesAtSameLevel :: UiNodePtr -> UiNodePtr -> IO ()
+foreign import ccall "elmlike drawNodes"
+  _drawNodes :: UiNodePtr -> IO ()
 
 -- EventSignal: Keep these signal definitions in sync with
 -- the definition in the elmlike clib.
@@ -24,6 +35,7 @@ intToEventSignal _ = EventSignal_NONE
 
 -- Widgets
 data Widget = Text String | Button String String -- TODO button should have some 'onClick' events
+-- TODO Add `Row [Widget]` and `Column [Widget]`.
 
 data Program model_type command_type = Program {
   model    :: model_type,
@@ -49,16 +61,14 @@ runProgram initialModel updateFn viewFn cmd = do
 programLifecycleStep :: Program model_type command_type -> command_type -> IO ()
 programLifecycleStep program cmd = do
   let
-      combined_widgets = (map drawWidget ((viewFn program) (model program)))
-
-      concatWithSpace :: String -> String -> String
-      concatWithSpace a b = a ++ " " ++ b
-
-      spaceConcat :: [String] -> String
-      spaceConcat lst = (foldl concatWithSpace "") lst
-
-      in withCString (spaceConcat combined_widgets) $ \cstr -> do
-        _draw_text cstr
+      all_widget_ui_nodes = map convertWidgetToNode ((viewFn program) (model program))
+      in do
+        connectNodePairsStartingAtIndex all_widget_ui_nodes 0
+        if (length all_widget_ui_nodes) > 0
+          then do
+            head_node <- (all_widget_ui_nodes !! 0)
+            _drawNodes head_node
+          else pure ()
 
   do
     signal_raw <- _poll_event_signal
@@ -75,11 +85,44 @@ programRunUpdate program cmd = Program {
   viewFn   = (viewFn program)
 }
 
+-- Recursively connect all nodes in `nodes` by connecting every pair to
+-- each other.
+connectNodePairsStartingAtIndex :: [IO UiNodePtr] -> Int -> IO ()
+connectNodePairsStartingAtIndex nodes offset
+  | not(in_bounds nodes offset) = return ()
+  | otherwise = do
+                  let
+                    left  = if in_bounds nodes (offset)
+                      then nodes !! (offset)
+                      else return nullPtr
+                    right = if in_bounds nodes (offset + 1)
+                      then nodes !! (offset + 1)
+                      else return nullPtr
+                    in connectNodesAtSameLevel left right
+                  connectNodePairsStartingAtIndex nodes (offset + 1)
+
+-- Connects 2 nodes, `left` and `right` to each other, making `left` ordered
+-- to the left of `right`. `left`'s previous right will become `right`'s right.
+connectNodesAtSameLevel :: IO UiNodePtr -> IO UiNodePtr -> IO ()
+connectNodesAtSameLevel left right = do
+  nleft <- left
+  nright <- right
+  _connectNodesAtSameLevel nleft nright
+
+-- Returns true if `idx` is within the bounds of `arr`.
+in_bounds :: [a] -> Int -> Bool
+in_bounds arr idx = idx < (length arr)
+
+convertWidgetToNode :: Widget -> IO UiNodePtr
+convertWidgetToNode (Text content) = withCString content $ \content_cstr -> do
+  ui_node_ptr <- _makeTextNode content_cstr 24
+  return ui_node_ptr
+convertWidgetToNode  (Button _ _) = convertWidgetToNode (Text "button placeholder")
+
 drawWidget :: Widget -> String
 drawWidget widget = case widget of
   (Text body) -> body
   (Button button_text _) -> button_text
-
 
 ------------------------------------------------------------------------------------
 ------------------------------------------------------------------------------------

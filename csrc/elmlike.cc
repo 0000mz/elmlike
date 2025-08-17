@@ -220,7 +220,7 @@ void run_ui_loop(Renderer &renderer) {
         SkFont font(first_typeface, 24.0f);
         sk_sp<SkTextBlob> text_blob = SkTextBlob::MakeFromText(
             _text_to_draw.c_str(), _text_to_draw.size(), font);
-        canvas->drawTextBlob(text_blob.get(), 100, 100, paint);
+        canvas->drawTextBlob(text_blob.get(), 0, 24.0f, paint);
       }
 
       // canvas->drawRect(rect, paint);
@@ -677,4 +677,48 @@ void UiExec(std::function<void()> hs_entry) {
 void draw_text(const char *text) {
   std::scoped_lock l(_text_to_draw_mutex);
   _text_to_draw = std::string(text);
+}
+
+struct TextNode {
+  std::string content;
+  uint32_t size;
+};
+
+struct UiNode {
+  UiNode *prev, *next;
+  void *priv;
+};
+
+void* makeTextNode(const char *content, uint32_t size) {
+  // TODO: Refactor this node system to not do allocations.. these allocations
+  // will happen every re-render.
+  auto text = std::make_unique<TextNode>();
+  text->size = size;
+  text->content = content;
+
+  auto new_node = std::make_unique<UiNode>();
+  new_node->priv = reinterpret_cast<void *>(text.release());
+  return reinterpret_cast<void *>(new_node.release());
+}
+
+void connectNodesAtSameLevel(void *left_opaq, void *right_opaq) {
+  UiNode *left = reinterpret_cast<UiNode *>(left_opaq);
+  UiNode *right = reinterpret_cast<UiNode *>(right_opaq);
+  assert(left);
+  if (right != nullptr) {
+    left->next = right;
+    right->prev = left;
+    printf("Connected %p to %p\n", left, right);
+  } else {
+    left->next = nullptr;
+  }
+}
+
+void drawNodes(void *head_opaq) {
+  assert(head_opaq);
+
+  UiNode *node = reinterpret_cast<UiNode *>(head_opaq);
+  while (node) {
+    node = node->next;
+  }
 }
