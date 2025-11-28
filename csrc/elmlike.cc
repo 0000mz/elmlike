@@ -14,7 +14,13 @@
 
 #include "renderer.h"
 
+#include "absl/synchronization/mutex.h"
+#include "absl/base/thread_annotations.h"
+
 namespace {
+
+using ::elmlike::UiNode;
+using ::elmlike::TextNode;
 
 enum class EventSignal : int {
   NONE = 0,
@@ -27,6 +33,11 @@ std::queue<EventSignal> _event_queue;
 std::mutex _event_queue_mutex;
 std::thread _hs_thread;
 bool _start_gui = false;
+
+// TODO: Need cmake build to use clang to build otherwise these
+// thread annotations don't matter...
+absl::Mutex _renderer_ref_mu;
+elmlike::Renderer *_renderer_ref ABSL_GUARDED_BY(_renderer_ref_mu);
 // }
 
 void signal_hs_shutdown() {
@@ -67,23 +78,26 @@ void UiExec(std::function<void()> hs_entry) {
     _hs_thread.join();
     return;
   }
+  {
+    absl::MutexLock l(&_renderer_ref_mu);
+    _renderer_ref = renderer.get();
+  }
   renderer->StartRenderLoop();
   signal_hs_shutdown();
   _hs_thread.join();
   printf("[UiExec] stopping hs thread.\n");
 }
 
-struct TextNode {
-  std::string content;
-  uint32_t size;
-};
-
-struct UiNode {
-  UiNode *prev, *next;
-  void *priv;
-};
+int GetNextDebugId() {
+  static absl::Mutex id_mtx;
+  absl::MutexLock l(&id_mtx);
+  static int id = 0;
+  return ++id;
+}
 
 void* MakeTextNode(const char *content, uint32_t size) {
+  const int id = GetNextDebugId();
+  printf("MakeTextNode Called: id=%d (%s)\n", id, content);
   // TODO: Refactor this node system to not do allocations.. these allocations
   // will happen every re-render.
   auto text = std::make_unique<TextNode>();
@@ -91,6 +105,7 @@ void* MakeTextNode(const char *content, uint32_t size) {
   text->content = content;
 
   auto new_node = std::make_unique<UiNode>();
+  new_node->debug_id = std::to_string(id);
   new_node->priv = reinterpret_cast<void *>(text.release());
   return reinterpret_cast<void *>(new_node.release());
 }
@@ -102,17 +117,31 @@ void ConnectNodesAtSameLevel(void *left_opaq, void *right_opaq) {
   if (right != nullptr) {
     left->next = right;
     right->prev = left;
-    printf("Connected %p to %p\n", left, right);
+    printf("Connected %p (%s) to %p (%s)\n", left, left->debug_id.c_str(), right, right->debug_id.c_str());
   } else {
     left->next = nullptr;
+    printf("Connect %p (%s) to %p\n", left, left->debug_id.c_str(), nullptr);
   }
 }
 
 void DrawNodes(void *head_opaq) {
   assert(head_opaq);
 
-  UiNode *node = reinterpret_cast<UiNode *>(head_opaq);
-  while (node) {
-    node = node->next;
+  { // Test draw -- todo actually queue the draw calls for each node
+    absl::MutexLock l(&_renderer_ref_mu);
+    if (_renderer_ref != nullptr) {
+      _renderer_ref->StartDrawPhase();
+
+      UiNode *node = reinterpret_cast<UiNode *>(head_opaq);
+      printf("head node=%p (%s)\n", node, node->debug_id.c_str());
+      uint32_t nb_nodes_drawn = 0;
+      while (node) {
+        _renderer_ref->DrawNode(*node);
+        node = node->next;
+        ++nb_nodes_drawn;
+      }
+      _renderer_ref->EndDrawPhase();
+      printf("Drew %u nodes\n", nb_nodes_drawn);
+    }
   }
 }

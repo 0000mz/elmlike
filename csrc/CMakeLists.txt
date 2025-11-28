@@ -39,6 +39,7 @@ find_package(GTest CONFIG REQUIRED)
 find_package(Iconv REQUIRED)
 find_package(unofficial-libffi CONFIG REQUIRED)
 pkg_check_modules(gmp REQUIRED IMPORTED_TARGET gmp)
+find_package(absl CONFIG REQUIRED)
 
 ######################################################
 ### ElmLike C Lib
@@ -54,6 +55,8 @@ target_link_libraries(renderer PRIVATE
 set(ELMLIKE_LIBRARY_DEPS
     SDL3::SDL3
     renderer
+    absl::base
+    absl::synchronization
 )
 
 # ElmLike: Shared

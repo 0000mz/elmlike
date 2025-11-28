@@ -14,7 +14,11 @@
     "vulkan-loader",
     "vulkan-utility-libraries",
     "vulkan-validationlayers",
-    "volk"
+    "volk",
+    {
+      "name": "absl",
+      "featurs": ["cxx17"]
+    }
   ],
   "overrides": [
     {

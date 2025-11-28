@@ -2,6 +2,7 @@
 
 #include <dlfcn.h>
 
+#include <semaphore>
 #include <span>
 #include <cstdio>
 #include <memory>
@@ -56,6 +57,8 @@ struct RendererInternal {
   std::vector<VkImage> swapchain_images;
   std::vector<VkImageView> swapchain_image_views;
   std::vector<VkFence> fences;
+  // The active VkImage index being drawn to.
+  uint32_t image_index;
 
   std::vector<VkSemaphore> image_available_semaphores;
   std::vector<VkSemaphore> render_finished_semaphores;
@@ -65,6 +68,10 @@ struct RendererInternal {
 
   // Skia resources
   sk_sp<GrDirectContext> skia_ctx;
+  sk_sp<SkFontMgr> font_manager;
+
+  std::binary_semaphore draw_phase_queue_start_sem{0};
+  std::binary_semaphore draw_phase_queue_end_sem{0};
 
   ~RendererInternal();
 };
@@ -367,18 +374,54 @@ int Renderer_InitWindowWithSki(RendererInternal &renderer) {
   return Renderer_SetupSkia(renderer);
 }
 
+void Renderer_DrawText(RendererInternal& renderer, const TextNode& text) {
+
+  SkPaint paint;
+  paint.setColor(SK_ColorBLUE);
+  paint.setStyle(SkPaint::kFill_Style);
+  paint.setAntiAlias(true);
+
+  // Skia drawing
+  if (!renderer.font_manager) {
+    renderer.font_manager = SkFontMgr_New_CoreText(nullptr);
+    if (!renderer.font_manager) {
+      fprintf(stderr, "Failed to load font manager.\n");
+      return;
+    }
+  }
+
+  {
+    SkCanvas *canvas = renderer.skia_surfaces[renderer.image_index]->getCanvas();
+    SkFontMgr *font_manager = renderer.font_manager.get();
+    // TODO: opt - save the typeface in state instead of querying it every
+    // frame.
+    sk_sp<SkTypeface> first_typeface =
+        std::invoke([&font_manager]() -> sk_sp<SkTypeface> {
+          const int nb_font_families = font_manager->countFamilies();
+          for (int i = 0; i < nb_font_families; ++i) {
+            SkString family_name;
+            font_manager->getFamilyName(i, &family_name);
+            sk_sp<SkTypeface> typeface = font_manager->matchFamilyStyle(
+                family_name.c_str(), SkFontStyle::Normal());
+            if (typeface)
+              return typeface;
+          }
+          return nullptr;
+        });
+    if (!first_typeface) {
+      fprintf(stderr, "Failed to load font typeface.\n");
+      return;
+    }
+    SkFont font(first_typeface, 24.0f);
+    sk_sp<SkTextBlob> text_blob = SkTextBlob::MakeFromText(
+        text.content.c_str(), text.content.size(), font);
+    canvas->drawTextBlob(text_blob.get(), 100.0f, 100.0f, paint);
+  }
+}
+
 void Renderer_RunRenderLoopInternal(RendererInternal &renderer) {
   assert(renderer.window);
   glfwMakeContextCurrent(renderer.window);
-
-  // TODO: Remove this
-  const std::string kTextToDraw = "placeholder text";
-
-  sk_sp<SkFontMgr> font_manager = SkFontMgr_New_CoreText(nullptr);
-  if (!font_manager) {
-    fprintf(stderr, "Failed to load font manager.\n");
-    return;
-  }
 
   uint32_t current_frame = 0;
   while (!glfwWindowShouldClose(renderer.window)) {
@@ -390,11 +433,10 @@ void Renderer_RunRenderLoopInternal(RendererInternal &renderer) {
     vkQueueWaitIdle(renderer.graphics_queue);
     vkResetCommandBuffer(renderer.command_buffer, 0);
 
-    uint32_t image_index;
     VkResult result = vkAcquireNextImageKHR(
         renderer.vk_device, renderer.swapchain, UINT64_MAX,
         renderer.image_available_semaphores[current_frame], VK_NULL_HANDLE,
-        &image_index);
+        &renderer.image_index);
 
     if (result == VK_ERROR_OUT_OF_DATE_KHR) {
       // TODO: Handle swapchain recreation
@@ -418,7 +460,7 @@ void Renderer_RunRenderLoopInternal(RendererInternal &renderer) {
     initial_barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     initial_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     initial_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    initial_barrier.image = renderer.swapchain_images[image_index];
+    initial_barrier.image = renderer.swapchain_images[renderer.image_index];
     initial_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     initial_barrier.subresourceRange.baseMipLevel = 0;
     initial_barrier.subresourceRange.levelCount = 1;
@@ -446,48 +488,18 @@ void Renderer_RunRenderLoopInternal(RendererInternal &renderer) {
               "Failed to submit initial layout transition command buffer.\n");
       break;
     }
-    vkQueueWaitIdle(
-        renderer.graphics_queue); // Wait for the transition to complete
+    vkQueueWaitIdle(renderer.graphics_queue); // Wait for the transition to complete
 
-    // Skia drawing
-    SkCanvas *canvas = renderer.skia_surfaces[image_index]->getCanvas();
-    canvas->clear(SK_ColorWHITE);
-
-    { // Test draw
-      SkPaint paint;
-      paint.setColor(SK_ColorBLUE);
-      paint.setStyle(SkPaint::kFill_Style);
-      paint.setAntiAlias(true);
-
-      {
-        // TODO: opt - save the typeface in state instead of querying it every
-        // frame.
-        sk_sp<SkTypeface> first_typeface =
-            std::invoke([&font_manager]() -> sk_sp<SkTypeface> {
-              const int nb_font_families = font_manager->countFamilies();
-              for (int i = 0; i < nb_font_families; ++i) {
-                SkString family_name;
-                font_manager->getFamilyName(i, &family_name);
-                sk_sp<SkTypeface> typeface = font_manager->matchFamilyStyle(
-                    family_name.c_str(), SkFontStyle::Normal());
-                if (typeface)
-                  return typeface;
-              }
-              return nullptr;
-            });
-        if (!first_typeface) {
-          fprintf(stderr, "Failed to load font typeface.\n");
-          return;
-        }
-        SkFont font(first_typeface, 24.0f);
-        sk_sp<SkTextBlob> text_blob = SkTextBlob::MakeFromText(
-            kTextToDraw.c_str(), kTextToDraw.size(), font);
-        canvas->drawTextBlob(text_blob.get(), 0, 24.0f, paint);
-      }
-
-      // canvas->drawRect(rect, paint);
-      renderer.skia_ctx->flushAndSubmit();
+    SkCanvas *canvas = renderer.skia_surfaces[renderer.image_index]->getCanvas();
+    canvas->clear(SK_ColorBLACK);
+    {
+      // CAN QUEUE DRAW COMMANDS NOW
+      renderer.draw_phase_queue_start_sem.release();
+      renderer.draw_phase_queue_end_sem.acquire();
+      // CAN NO LONGER QUEUE DRAW COMMANDS
     }
+
+    renderer.skia_ctx->flushAndSubmit();
 
     // Now, record the command buffer for presentation barrier
     vkResetCommandBuffer(renderer.command_buffer, 0); // Reset for reuse
@@ -505,7 +517,7 @@ void Renderer_RunRenderLoopInternal(RendererInternal &renderer) {
     present_barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
     present_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     present_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    present_barrier.image = renderer.swapchain_images[image_index];
+    present_barrier.image = renderer.swapchain_images[renderer.image_index];
     present_barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     present_barrier.subresourceRange.baseMipLevel = 0;
     present_barrier.subresourceRange.levelCount = 1;
@@ -554,7 +566,7 @@ void Renderer_RunRenderLoopInternal(RendererInternal &renderer) {
     VkSwapchainKHR swapchains[] = {renderer.swapchain};
     present_info.swapchainCount = 1;
     present_info.pSwapchains = swapchains;
-    present_info.pImageIndices = &image_index;
+    present_info.pImageIndices = &renderer.image_index;
 
     result = vkQueuePresentKHR(renderer.graphics_queue, &present_info);
     if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR) {
@@ -631,6 +643,19 @@ bool Renderer::Init() {
 
 void Renderer::StartRenderLoop() {
   Renderer_RunRenderLoop(renderer_.get());
+}
+
+void Renderer::StartDrawPhase() {
+  renderer_->draw_phase_queue_start_sem.acquire();
+}
+
+void Renderer::EndDrawPhase() {
+  renderer_->draw_phase_queue_end_sem.release();
+}
+
+void Renderer::DrawNode(const UiNode &node) {
+  // TODO: Assume everything is a text for now...
+  Renderer_DrawText(*renderer_, *reinterpret_cast<const TextNode *>(node.priv));
 }
 
 Renderer::~Renderer() {}
