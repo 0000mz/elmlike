@@ -59,11 +59,23 @@ frameworks_dep = dependency('appleframeworks', modules : ['Cocoa', 'IOKit', 'Cor
 cmake = import('cmake')
 
 # SDL3 (CMake subproject)
-sdl3_proj = cmake.subproject('sdl3')
+sdl3_opts = cmake.subproject_options()
+sdl3_opts.add_cmake_defines({
+  'SDL_TESTS': 'OFF',
+  'SDL_EXAMPLES': 'OFF',
+  'SDL_INSTALL_TESTS': 'OFF'
+})
+sdl3_proj = cmake.subproject('sdl3', options : sdl3_opts)
 sdl3_dep = sdl3_proj.dependency('SDL3-shared') 
 
 # GLFW (CMake subproject)
-glfw_proj = cmake.subproject('glfw')
+glfw_opts = cmake.subproject_options()
+glfw_opts.add_cmake_defines({
+  'GLFW_BUILD_DOCS': 'OFF',
+  'GLFW_BUILD_TESTS': 'OFF',
+  'GLFW_BUILD_EXAMPLES': 'OFF'
+})
+glfw_proj = cmake.subproject('glfw', options : glfw_opts)
 glfw_dep = glfw_proj.dependency('glfw')
 
 
