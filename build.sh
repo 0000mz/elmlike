@@ -27,9 +27,6 @@ export CC=clang
 # Setup build directory
 if [ ! -d "build" ]; then
     meson setup build
-else
-    # Reconfigure to ensure env changes (like CXX) are picked up
-    meson setup --reconfigure build
 fi
 
 # Compile
