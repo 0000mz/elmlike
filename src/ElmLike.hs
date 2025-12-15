@@ -59,14 +59,18 @@ runProgram initialModel updateFn viewFn cmd = do
 programLifecycleStep :: Program model_type command_type -> command_type -> IO ()
 programLifecycleStep program cmd = do
   let
-      all_widget_ui_nodes = map convertWidgetToNode ((viewFn program) (model program))
-      in do
-        connectNodePairsStartingAtIndex all_widget_ui_nodes 0
-        if (length all_widget_ui_nodes) > 0
-          then do
-            head_node <- (all_widget_ui_nodes !! 0)
-            _DrawNodes head_node
-          else pure ()
+      widget_creation_actions = map convertWidgetToNode ((viewFn program) (model program))
+  
+  -- Execute all creation actions once to get the list of pointers
+  all_widget_ui_nodes <- sequence widget_creation_actions
+  
+  do
+    connectNodePairsStartingAtIndex all_widget_ui_nodes 0
+    if (length all_widget_ui_nodes) > 0
+      then do
+        let head_node = all_widget_ui_nodes !! 0
+        _DrawNodes head_node
+      else pure ()
 
   do
     signal_raw <- _PollEventSignal
@@ -85,27 +89,17 @@ programRunUpdate program cmd = Program {
 
 -- Recursively connect all nodes in `nodes` by connecting every pair to
 -- each other.
-connectNodePairsStartingAtIndex :: [IO UiNodePtr] -> Int -> IO ()
+connectNodePairsStartingAtIndex :: [UiNodePtr] -> Int -> IO ()
 connectNodePairsStartingAtIndex nodes offset
   | not(in_bounds nodes offset) = return ()
   | otherwise = do
                   let
-                    left  = if in_bounds nodes (offset)
-                      then nodes !! (offset)
-                      else return nullPtr
+                    left  = nodes !! offset
                     right = if in_bounds nodes (offset + 1)
                       then nodes !! (offset + 1)
-                      else return nullPtr
-                    in connectNodesAtSameLevel left right
+                      else nullPtr
+                  _ConnectNodesAtSameLevel left right
                   connectNodePairsStartingAtIndex nodes (offset + 1)
-
--- Connects 2 nodes, `left` and `right` to each other, making `left` ordered
--- to the left of `right`. `left`'s previous right will become `right`'s right.
-connectNodesAtSameLevel :: IO UiNodePtr -> IO UiNodePtr -> IO ()
-connectNodesAtSameLevel left right = do
-  nleft <- left
-  nright <- right
-  _ConnectNodesAtSameLevel nleft nright
 
 -- Returns true if `idx` is within the bounds of `arr`.
 in_bounds :: [a] -> Int -> Bool
