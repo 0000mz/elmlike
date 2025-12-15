@@ -1,11 +1,13 @@
-#include "ElmLike_stub.h"
 #include "elmlike.h"
 
-
-#include <functional>
+#include <HsFFI.h>
 #include <cstdio>
+#include <functional>
 
-int main (int argc, char **argv) {
+// Exported from ElmLike.hs
+extern void exampleProgram(void);
+
+int main(int argc, char **argv) {
   printf("Elmlike Main.\n");
   printf("Running exampleProgram.\n");
 

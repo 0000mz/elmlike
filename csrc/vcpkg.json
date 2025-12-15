@@ -2,7 +2,9 @@
   "dependencies": [
     {
       "name": "skia",
-      "features": ["vulkan"]
+      "features": [
+        "vulkan"
+      ]
     },
     "vk-bootstrap",
     "gtest",
@@ -16,8 +18,10 @@
     "vulkan-validationlayers",
     "volk",
     {
-      "name": "absl",
-      "featurs": ["cxx17"]
+      "name": "abseil",
+      "features": [
+        "cxx17"
+      ]
     }
   ],
   "overrides": [

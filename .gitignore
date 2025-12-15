@@ -26,3 +26,10 @@ csrc/gen/
 
 .cache/
 vcpkg_installed/
+
+# Meson subprojects
+subprojects/*
+!subprojects/*.wrap
+
+# Generated compilation database
+compile_commands.json
