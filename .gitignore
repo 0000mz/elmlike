@@ -26,3 +26,7 @@ csrc/gen/
 
 .cache/
 vcpkg_installed/
+
+# Meson subprojects
+subprojects/*
+!subprojects/*.wrap
