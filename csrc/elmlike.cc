@@ -37,7 +37,7 @@ bool _start_gui = false;
 
 // TODO: Need cmake build to use clang to build otherwise these
 // thread annotations don't matter...
-absl::Mutex _renderer_ref_mu;
+std::mutex _renderer_ref_mu;
 elmlike::Renderer *_renderer_ref ABSL_GUARDED_BY(_renderer_ref_mu);
 // }
 
@@ -92,7 +92,7 @@ void UiExec(std::function<void()> hs_entry) {
     return;
   }
   {
-    absl::MutexLock l(&_renderer_ref_mu);
+    std::scoped_lock l(_renderer_ref_mu);
     _renderer_ref = renderer.get();
   }
   renderer->StartRenderLoop();
@@ -142,7 +142,7 @@ void DrawNodes(void *head_opaq) {
   assert(head_opaq);
 
   { // Test draw -- todo actually queue the draw calls for each node
-    absl::MutexLock l(&_renderer_ref_mu);
+    std::scoped_lock l(_renderer_ref_mu);
     if (_renderer_ref != nullptr) {
       _renderer_ref->StartDrawPhase();
 
