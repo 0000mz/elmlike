@@ -1,0 +1,6 @@
+2025 DEC 12:
+- Now using meson to build the project.
+
+TODOS:
+- Trim down dependencies.
+- Migrate implementation to C from C++.
