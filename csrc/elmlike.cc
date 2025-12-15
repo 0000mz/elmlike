@@ -14,13 +14,13 @@
 
 #include "renderer.h"
 
-#include "absl/synchronization/mutex.h"
 #include "absl/base/thread_annotations.h"
+#include "absl/synchronization/mutex.h"
 
 namespace {
 
-using ::elmlike::UiNode;
 using ::elmlike::TextNode;
+using ::elmlike::UiNode;
 
 enum class EventSignal : int {
   NONE = 0,
@@ -32,6 +32,7 @@ enum class EventSignal : int {
 std::queue<EventSignal> _event_queue;
 std::mutex _event_queue_mutex;
 std::thread _hs_thread;
+std::mutex _start_gui_mutex;
 bool _start_gui = false;
 
 // TODO: Need cmake build to use clang to build otherwise these
@@ -58,7 +59,10 @@ EventSignal PollEventSignalInternal() {
 
 } // namespace
 
-void StartGui() { _start_gui = true; }
+void StartGui() {
+  std::scoped_lock l(_start_gui_mutex);
+  _start_gui = true;
+}
 
 int PollEventSignal() { return static_cast<int>(PollEventSignalInternal()); }
 
@@ -66,8 +70,17 @@ void UiExec(std::function<void()> hs_entry) {
   printf("[UiExec] starting hs thread.\n");
   _hs_thread = std::thread(hs_entry);
   // TODO: Remove this sleep lol.
-  while (!_start_gui) {
-    usleep(100'000); // 100ms
+  while (true) {
+    bool gui_started;
+    {
+      std::scoped_lock l(_start_gui_mutex);
+      gui_started = _start_gui;
+    }
+    if (gui_started) {
+      break;
+    } else {
+      usleep(100'000); // 100ms
+    }
   }
   printf("[UiExec] received signal to start ui thread.\n");
 
@@ -95,7 +108,7 @@ int GetNextDebugId() {
   return ++id;
 }
 
-void* MakeTextNode(const char *content, uint32_t size) {
+void *MakeTextNode(const char *content, uint32_t size) {
   const int id = GetNextDebugId();
   printf("MakeTextNode Called: id=%d (%s)\n", id, content);
   // TODO: Refactor this node system to not do allocations.. these allocations
@@ -117,7 +130,8 @@ void ConnectNodesAtSameLevel(void *left_opaq, void *right_opaq) {
   if (right != nullptr) {
     left->next = right;
     right->prev = left;
-    printf("Connected %p (%s) to %p (%s)\n", left, left->debug_id.c_str(), right, right->debug_id.c_str());
+    printf("Connected %p (%s) to %p (%s)\n", left, left->debug_id.c_str(),
+           right, right->debug_id.c_str());
   } else {
     left->next = nullptr;
     printf("Connect %p (%s) to %p\n", left, left->debug_id.c_str(), nullptr);
