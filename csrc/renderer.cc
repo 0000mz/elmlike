@@ -2,10 +2,10 @@
 
 #include <dlfcn.h>
 
-#include <semaphore>
-#include <span>
 #include <cstdio>
 #include <memory>
+#include <semaphore>
+#include <span>
 
 #include "VkBootstrap.h"
 
@@ -169,7 +169,6 @@ int Renderer_SetupSkia(RendererInternal &renderer) {
 
   return 0;
 }
-
 
 int Renderer_InitWindowWithSki(RendererInternal &renderer) {
   printf("Starting GUI.\n");
@@ -374,7 +373,8 @@ int Renderer_InitWindowWithSki(RendererInternal &renderer) {
   return Renderer_SetupSkia(renderer);
 }
 
-void Renderer_DrawText(RendererInternal& renderer, const TextNode& text) {
+void Renderer_DrawText(RendererInternal &renderer, const TextNode &text,
+                       const float x, const float y) {
 
   SkPaint paint;
   paint.setColor(SK_ColorBLUE);
@@ -391,7 +391,8 @@ void Renderer_DrawText(RendererInternal& renderer, const TextNode& text) {
   }
 
   {
-    SkCanvas *canvas = renderer.skia_surfaces[renderer.image_index]->getCanvas();
+    SkCanvas *canvas =
+        renderer.skia_surfaces[renderer.image_index]->getCanvas();
     SkFontMgr *font_manager = renderer.font_manager.get();
     // TODO: opt - save the typeface in state instead of querying it every
     // frame.
@@ -415,7 +416,8 @@ void Renderer_DrawText(RendererInternal& renderer, const TextNode& text) {
     SkFont font(first_typeface, 24.0f);
     sk_sp<SkTextBlob> text_blob = SkTextBlob::MakeFromText(
         text.content.c_str(), text.content.size(), font);
-    canvas->drawTextBlob(text_blob.get(), 100.0f, 100.0f, paint);
+    printf("DBG Drawing at x=%f y=%f\n", x, y);
+    canvas->drawTextBlob(text_blob.get(), x, y, paint);
   }
 }
 
@@ -488,9 +490,11 @@ void Renderer_RunRenderLoopInternal(RendererInternal &renderer) {
               "Failed to submit initial layout transition command buffer.\n");
       break;
     }
-    vkQueueWaitIdle(renderer.graphics_queue); // Wait for the transition to complete
+    vkQueueWaitIdle(
+        renderer.graphics_queue); // Wait for the transition to complete
 
-    SkCanvas *canvas = renderer.skia_surfaces[renderer.image_index]->getCanvas();
+    SkCanvas *canvas =
+        renderer.skia_surfaces[renderer.image_index]->getCanvas();
     canvas->clear(SK_ColorBLACK);
     {
       // CAN QUEUE DRAW COMMANDS NOW
@@ -581,13 +585,12 @@ void Renderer_RunRenderLoopInternal(RendererInternal &renderer) {
   printf("Window closed.\n");
 }
 
-
 void Renderer_RunRenderLoop(RendererInternal *renderer) {
   assert(renderer != nullptr);
   Renderer_RunRenderLoopInternal(*renderer);
 }
 
-}  // namespace
+} // namespace
 
 RendererInternal::~RendererInternal() {
   if (!this->window) {
@@ -626,7 +629,6 @@ RendererInternal::~RendererInternal() {
   glfwTerminate();
 }
 
-
 std::unique_ptr<Renderer> Renderer::Create() {
   auto renderer = std::unique_ptr<Renderer>(new Renderer);
   if (!renderer->Init()) {
@@ -641,23 +643,20 @@ bool Renderer::Init() {
   return Renderer_InitWindowWithSki(*renderer_) == 0;
 }
 
-void Renderer::StartRenderLoop() {
-  Renderer_RunRenderLoop(renderer_.get());
-}
+void Renderer::StartRenderLoop() { Renderer_RunRenderLoop(renderer_.get()); }
 
 void Renderer::StartDrawPhase() {
   renderer_->draw_phase_queue_start_sem.acquire();
 }
 
-void Renderer::EndDrawPhase() {
-  renderer_->draw_phase_queue_end_sem.release();
-}
+void Renderer::EndDrawPhase() { renderer_->draw_phase_queue_end_sem.release(); }
 
 void Renderer::DrawNode(const UiNode &node) {
   // TODO: Assume everything is a text for now...
-  Renderer_DrawText(*renderer_, *reinterpret_cast<const TextNode *>(node.priv));
+  Renderer_DrawText(*renderer_, *reinterpret_cast<const TextNode *>(node.priv),
+                    static_cast<float>(node.x), static_cast<float>(node.y));
 }
 
 Renderer::~Renderer() {}
 
-}  // elmlike
+} // namespace elmlike

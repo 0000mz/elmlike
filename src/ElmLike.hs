@@ -22,6 +22,8 @@ foreign import ccall "elmlike ConnectNodesAtSameLevel"
   _ConnectNodesAtSameLevel :: UiNodePtr -> UiNodePtr -> IO ()
 foreign import ccall "elmlike DrawNodes"
   _DrawNodes :: UiNodePtr -> IO ()
+foreign import ccall "elmlike PushNodesToRight"
+  _PushNodesToRight :: UiNodePtr -> IO ()
 
 -- EventSignal: Keep these signal definitions in sync with
 -- the definition in the elmlike clib.
@@ -69,6 +71,7 @@ programLifecycleStep program cmd = do
     if (length all_widget_ui_nodes) > 0
       then do
         let head_node = all_widget_ui_nodes !! 0
+        _PushNodesToRight head_node 
         _DrawNodes head_node
       else pure ()
 

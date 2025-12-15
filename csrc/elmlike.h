@@ -27,6 +27,9 @@ EXPORT void *MakeTextNode(const char *content, uint32_t size);
 // ordered to the left or right. Left's current right becomes right's right.
 EXPORT void ConnectNodesAtSameLevel(void *left_opaq, void *right_opaq);
 EXPORT void DrawNodes(void *head_opaq);
+// Find all nodes that are the left-most and push all nodes to the right so they
+// are properly offset.
+EXPORT void PushNodesToRight(void *head_opaq);
 
 #ifdef __cplusplus
 }

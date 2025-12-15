@@ -14,6 +14,7 @@ struct TextNode {
 struct UiNode {
   UiNode *prev, *next;
   std::string debug_id;
+  unsigned int width, height, x, y;
   void *priv;
 };
 
@@ -39,6 +40,6 @@ private:
 
   std::unique_ptr<RendererInternal> renderer_;
 };
-}
+} // namespace elmlike
 
-#endif  // _ELMLIKE_RENDERER_H_
+#endif // _ELMLIKE_RENDERER_H_

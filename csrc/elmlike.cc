@@ -118,6 +118,12 @@ void *MakeTextNode(const char *content, uint32_t size) {
   text->content = content;
 
   auto new_node = std::make_unique<UiNode>();
+  // TODO: placeholder node dimensions here...
+  new_node->width = 100;
+  new_node->height = 10;
+  new_node->x = 0;
+  new_node->y =
+      100; // TODO: Not yet decided how to set y, leaving at 100 so its visible.
   new_node->debug_id = std::to_string(id);
   new_node->priv = reinterpret_cast<void *>(text.release());
   return reinterpret_cast<void *>(new_node.release());
@@ -157,5 +163,20 @@ void DrawNodes(void *head_opaq) {
       _renderer_ref->EndDrawPhase();
       printf("Drew %u nodes\n", nb_nodes_drawn);
     }
+  }
+}
+
+void PushNodesToRight(void *head_opaq) {
+  assert(head_opaq);
+  UiNode *head = reinterpret_cast<UiNode *>(head_opaq);
+  while (head->prev != nullptr) {
+    head = head->prev;
+  }
+  unsigned int x_offset = 0;
+  while (head != nullptr) {
+    head->x = x_offset;
+    printf("Set node %p (%s) x=%d\n", head, head->debug_id.c_str(), head->x);
+    x_offset += head->width;
+    head = head->next;
   }
 }
