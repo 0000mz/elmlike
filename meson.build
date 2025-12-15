@@ -104,7 +104,6 @@ elmlike_lib = shared_library('elmlike',
   'csrc/elmlike.cc',
   include_directories : inc_dirs,
   dependencies : [renderer_dep, sdl3_dep, absl_deps],
-  cpp_args : ['-DBUILD_WITH_HASKELL_STUB=0'],
   install : true
 )
 
@@ -199,7 +198,6 @@ gui_test = executable('gui_test',
   'csrc/tests/gui_test.cc',
   include_directories : inc_dirs,
   dependencies : [elmlike_dep, gtest_dep, gtest_main_dep],
-  cpp_args : ['-DBUILD_WITH_HASKELL_STUB=0']
 )
 
 test('gui_test', gui_test)
