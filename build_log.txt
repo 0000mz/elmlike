@@ -1,0 +1,15 @@
+ninja: Entering directory `build'
+[1/9] Linking static target librenderer.a
+[2/9] Linking target subprojects/sdl3/libSDL3_shared.dylib
+ld: warning: -undefined error is deprecated
+[3/9] Generating symbol file subprojects/sdl3/libSDL3_shared.dylib.p/libSDL3_shared.dylib.symbols
+[4/9] Compiling C++ object elmlike-main.p/csrc_elmlike_main.cc.o
+FAILED: elmlike-main.p/csrc_elmlike_main.cc.o 
+c++ -Ielmlike-main.p -I. -I.. -I/Users/mob/Projects/elmlike/build -Icsrc -I../csrc -I../src -fdiagnostics-color=always -D_LIBCPP_ENABLE_ASSERTIONS=1 -Wall -Winvalid-pch -Wextra -Wpedantic -std=c++20 -O0 -g -MD -MQ elmlike-main.p/csrc_elmlike_main.cc.o -MF elmlike-main.p/csrc_elmlike_main.cc.o.d -o elmlike-main.p/csrc_elmlike_main.cc.o -c ../csrc/elmlike_main.cc
+../csrc/elmlike_main.cc:3:10: fatal error: 'HsFFI.h' file not found
+    3 | #include <HsFFI.h>
+      |          ^~~~~~~~~
+1 error generated.
+[5/9] Linking target libelmlike.dylib
+ld: warning: ignoring duplicate libraries: '-lc++'
+ninja: build stopped: subcommand failed.

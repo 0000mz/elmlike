@@ -5,7 +5,7 @@
 #include <functional>
 
 // Exported from ElmLike.hs
-extern void exampleProgram(void);
+extern "C" void exampleProgram(void);
 
 int main(int argc, char **argv) {
   printf("Elmlike Main.\n");

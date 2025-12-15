@@ -164,30 +164,26 @@ elmlike_hs_obj = custom_target('elmlike_hs_obj',
   build_by_default : false
 )
 
-# 2. Link C++ Main with Haskell Object
-elmlike_main = custom_target('elmlike-main',
-  output : 'elmlike-main',
-  input : ['csrc/elmlike_main.cc', elmlike_hs_obj[0], elmlike_hs_obj[1]], # cc, .o, .h
-  depends : [elmlike_lib],
-  command : [
-    'ghc',
-    '-o', '@OUTPUT@',
-    '-odir', '@PRIVATE_DIR@',
-    '-hidir', '@PRIVATE_DIR@',
-    '-stubdir', '@PRIVATE_DIR@',
-    '-no-hs-main',
-    '-optcxx-std=c++20',
-    '-I' + meson.project_source_root() / 'src',
-    '-I' + meson.project_source_root() / 'csrc',
-    '-I' + meson.current_build_dir(), # Stub is in build root
-    '-optcxx-I' + meson.current_build_dir(),
-    '@INPUT0@', # C++ source
-    '@INPUT1@', # Haskell object
-    '-L' + meson.current_build_dir(),
-    '-lelmlike',
-    '-optl-Wl,-rpath,' + meson.current_build_dir(),
-    '-lstdc++'
-  ],
+# 2. Link C++ Main with Haskell Object (using C++ linker)
+# Retrieve GHC linker flags (libraries and paths)
+ghc_info = run_command('python3', meson.current_source_dir() / 'csrc/get_ghc_info.py', check: true)
+ghc_flags = ghc_info.stdout().strip().split('\n')
+ghc_inc_args = []
+ghc_link_args = []
+foreach f : ghc_flags
+  if f.startswith('-I')
+    ghc_inc_args += f
+  else
+    ghc_link_args += f
+  endif
+endforeach
+
+elmlike_main = executable('elmlike-main',
+  sources : ['csrc/elmlike_main.cc', elmlike_hs_obj[0]], # Compile cc and link with Haskell object
+  include_directories : [inc_dirs, include_directories('src')],
+  dependencies : [elmlike_dep],
+  cpp_args : ['-I' + meson.current_build_dir()] + ghc_inc_args, # Ensure stub path and GHC headers are included
+  link_args : ghc_link_args,
   install : false,
   build_by_default : true
 )
