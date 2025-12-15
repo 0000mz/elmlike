@@ -4,3 +4,4 @@
 TODOS:
 - Trim down dependencies.
 - Migrate implementation to C from C++.
+- Create draw manifest that reports all of the draws that occurred in each frame -- for testability.
