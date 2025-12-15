@@ -17,6 +17,8 @@ harfbuzz_dep = dependency('harfbuzz')
 icu_dep = dependency('icu-uc')
 libwebp_dep = dependency('libwebp')
 libwebpdemux_dep = dependency('libwebpdemux')
+gtest_dep = dependency('gtest')
+gtest_main_dep = dependency('gtest_main')
 
 # Abseil dependencies (need to link specific components used)
 absl_base_dep = dependency('absl_base')
@@ -175,3 +177,14 @@ elmlike_main = custom_target('elmlike-main',
   install : false,
   build_by_default : true
 )
+
+# --- Tests ---
+
+gui_test = executable('gui_test',
+  'csrc/tests/gui_test.cc',
+  include_directories : inc_dirs,
+  dependencies : [elmlike_dep, gtest_dep, gtest_main_dep],
+  cpp_args : ['-DBUILD_WITH_HASKELL_STUB=0']
+)
+
+test('gui_test', gui_test)
