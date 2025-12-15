@@ -83,71 +83,9 @@ glfw_dep = glfw_proj.dependency('glfw')
 
 inc_dirs = include_directories('.', 'csrc')
 
-# Renderer Library (Static)
-renderer_lib = static_library('renderer',
-  'csrc/renderer.cc',
-  include_directories : inc_dirs,
-  dependencies : [skia_dep, glfw_dep, vk_bootstrap_dep, vulkan_dep, absl_deps, 
-                  zlib_dep, libpng_dep, libjpeg_dep, freetype_dep, harfbuzz_dep, icu_dep,
-                  libwebp_dep, libwebpdemux_dep, frameworks_dep],
-)
 
-renderer_dep = declare_dependency(
-  link_with : renderer_lib,
-  include_directories : inc_dirs,
-  dependencies: [skia_dep, glfw_dep, vk_bootstrap_dep, vulkan_dep] # Public deps needed for headers?
-)
-
-# ElmLike Library (Shared)
-# We build as shared so it links all static deps (Skia, etc) into one dynamic lib for Haskell to load.
-elmlike_lib = shared_library('elmlike',
-  'csrc/elmlike.cc',
-  include_directories : inc_dirs,
-  dependencies : [renderer_dep, sdl3_dep, absl_deps],
-  install : true
-)
-
-elmlike_dep = declare_dependency(
-  link_with : elmlike_lib,
-  include_directories : inc_dirs
-)
-
-# --- Haskell Targets (Manual via custom_target) ---
-# Meson haskell module is missing/broken in this env, using GHC directly.
-
-# We need the output path of the library to pass to GHC.
-# For shared library, we need to ensure GHC finds it at link time and runtime.
-# On macOS, using @rpath or absolute path is needed.
-
-# We'll compile the Haskell Main (test/Main.hs) and link against elmlike.
-# Assuming test/Main.hs is the entry point user cares about for "my haskell program".
-# Or maybe src/ElmLike.hs is just a lib.
-# The user said "build my haskell program". `test/Main.hs` seems to be the executable entry.
-
-# Build target for the Haskell executable
-elmlike_hs = custom_target('elmlike-hs',
-  output : 'elmlike-prog',
-  input : ['test/Main.hs', 'src/ElmLike.hs'], # Depend on source
-  depends : [elmlike_lib], # Ensure C++ lib is built first
-  command : [
-    'ghc',
-    '-o', '@OUTPUT@',
-    '-odir', '@PRIVATE_DIR@',
-    '-hidir', '@PRIVATE_DIR@',
-    '-stubdir', '@PRIVATE_DIR@',
-    '-i' + meson.project_source_root() / 'src', # Include src dir for ElmLike module
-    meson.project_source_root() / 'test/Main.hs',
-    '-L' + meson.current_build_dir(),
-    '-lelmlike',
-    '-optl-Wl,-rpath,' + meson.current_build_dir() # Set RPATH so it finds dylib in build dir
-  ],
-  install : false,
-  build_by_default : true
-)
-
-# 1. Compile Haskell (and generate stub)
+# 1. Compile Haskell Object (Global, not variant-specific)
 # We need to output the object and the stub.
-# Note: output filenames must match what GHC produces.
 elmlike_hs_obj = custom_target('elmlike_hs_obj',
   output : ['ElmLike.o', 'ElmLike_stub.h', 'ElmLike.hi'],
   input : 'src/ElmLike.hs',
@@ -164,7 +102,6 @@ elmlike_hs_obj = custom_target('elmlike_hs_obj',
   build_by_default : false
 )
 
-# 2. Link C++ Main with Haskell Object (using C++ linker)
 # Retrieve GHC linker flags (libraries and paths)
 ghc_info = run_command('python3', meson.current_source_dir() / 'csrc/get_ghc_info.py', check: true)
 ghc_flags = ghc_info.stdout().strip().split('\n')
@@ -178,22 +115,103 @@ foreach f : ghc_flags
   endif
 endforeach
 
-elmlike_main = executable('elmlike-main',
-  sources : ['csrc/elmlike_main.cc', elmlike_hs_obj[0]], # Compile cc and link with Haskell object
-  include_directories : [inc_dirs, include_directories('src')],
-  dependencies : [elmlike_dep],
-  cpp_args : ['-I' + meson.current_build_dir()] + ghc_inc_args, # Ensure stub path and GHC headers are included
-  link_args : ghc_link_args,
+# Build Variants (Default, UBSan, TSan)
+# Note: MSan is not supported on macOS.
+# UBSan: -fno-sanitize=vptr needed because Skia (vcpkg) is likely built with -fno-rtti
+build_variants = [
+  {'name': '', 'opts': [], 'args': []},
+  {'name': 'asan', 'opts': ['b_sanitize=address'], 'args': []},
+  {'name': 'ubsan', 'opts': ['b_sanitize=undefined'], 'args': ['-fno-sanitize=vptr']},
+  {'name': 'tsan', 'opts': ['b_sanitize=thread'], 'args': []}
+]
+
+elmlike_lib_default = disabler()
+
+foreach v : build_variants
+  variant = v['name']
+  opts = v['opts']
+  extra_args = v['args']
+  
+  suffix = (variant == '' ? '' : '_' + variant)
+  
+  # --- Renderer Library (Static) ---
+  renderer_lib = static_library('renderer' + suffix,
+    'csrc/renderer.cc',
+    include_directories : inc_dirs,
+    dependencies : [skia_dep, glfw_dep, vk_bootstrap_dep, vulkan_dep, absl_deps, 
+                    zlib_dep, libpng_dep, libjpeg_dep, freetype_dep, harfbuzz_dep, icu_dep,
+                    libwebp_dep, libwebpdemux_dep, frameworks_dep],
+    override_options : opts, 
+    cpp_args : extra_args
+  )
+
+  renderer_dep = declare_dependency(
+    link_with : renderer_lib,
+    include_directories : inc_dirs,
+    dependencies: [skia_dep, glfw_dep, vk_bootstrap_dep, vulkan_dep]
+  )
+
+  # --- ElmLike Library (Shared) ---
+  elmlike_lib = shared_library('elmlike' + suffix,
+    'csrc/elmlike.cc',
+    include_directories : inc_dirs,
+    dependencies : [renderer_dep, sdl3_dep, absl_deps],
+    install : true,
+    override_options : opts,
+    cpp_args : extra_args
+  )
+
+  elmlike_dep = declare_dependency(
+    link_with : elmlike_lib,
+    include_directories : inc_dirs
+  )
+
+  if variant == ''
+    elmlike_lib_default = elmlike_lib
+  endif
+
+  # --- elmlike-main Executable ---
+  executable('elmlike-main' + suffix,
+    sources : ['csrc/elmlike_main.cc', elmlike_hs_obj[0]], 
+    include_directories : [inc_dirs, include_directories('src')],
+    dependencies : [elmlike_dep],
+    cpp_args : ['-I' + meson.current_build_dir()] + ghc_inc_args + extra_args,
+    link_args : ghc_link_args,
+    install : false,
+    build_by_default : true,
+    override_options : opts
+  )
+
+  # --- gui_test Executable ---
+  t = executable('gui_test' + suffix,
+    'csrc/tests/gui_test.cc',
+    include_directories : inc_dirs,
+    dependencies : [elmlike_dep, gtest_dep, gtest_main_dep],
+    override_options : opts,
+    cpp_args : extra_args
+  )
+  
+  test('gui_test' + suffix, t)
+endforeach
+
+
+# --- Haskell Pure Target (uses default elmlike shared lib) ---
+elmlike_hs = custom_target('elmlike-hs',
+  output : 'elmlike-prog',
+  input : ['test/Main.hs', 'src/ElmLike.hs'], 
+  depends : [elmlike_lib_default], 
+  command : [
+    'ghc',
+    '-o', '@OUTPUT@',
+    '-odir', '@PRIVATE_DIR@',
+    '-hidir', '@PRIVATE_DIR@',
+    '-stubdir', '@PRIVATE_DIR@',
+    '-i' + meson.project_source_root() / 'src', 
+    meson.project_source_root() / 'test/Main.hs',
+    '-L' + meson.current_build_dir(),
+    '-lelmlike',
+    '-optl-Wl,-rpath,' + meson.current_build_dir() 
+  ],
   install : false,
   build_by_default : true
 )
-
-# --- Tests ---
-
-gui_test = executable('gui_test',
-  'csrc/tests/gui_test.cc',
-  include_directories : inc_dirs,
-  dependencies : [elmlike_dep, gtest_dep, gtest_main_dep],
-)
-
-test('gui_test', gui_test)

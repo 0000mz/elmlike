@@ -19,9 +19,17 @@ export PKG_CONFIG_PATH
 
 echo "Using PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
 
-# Setup build directory if it doesn't exist
+
+# Set compilers to Clang
+export CXX=clang++
+export CC=clang
+
+# Setup build directory
 if [ ! -d "build" ]; then
     meson setup build
+else
+    # Reconfigure to ensure env changes (like CXX) are picked up
+    meson setup --reconfigure build
 fi
 
 # Compile
